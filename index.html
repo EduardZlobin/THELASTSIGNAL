@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Last Signal | ELF-Band Transmission</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header class="main-header">
+    <div class="header-content">
+        <div class="logo-area" onclick="location.reload()">
+            <h1>THE LAST SIGNAL</h1>
+            <p class="subtitle">ELF-BAND TRANSMISSION</p>
+        </div>
+        
+        <div class="header-right">
+            <div class="lang-switch">
+                <span onclick="setLanguage('en')" id="lang-en">EN</span>
+                <span style="color: #444;">|</span>
+                <span onclick="setLanguage('ru')" id="lang-ru">RU</span>
+            </div>
+            <div id="auth-section"></div>
+        </div>
+    </div>
+</header>
+
+<div class="app-container">
+    <aside class="sidebar">
+        <div class="sidebar-block">
+            <button class="btn-nav active" onclick="loadPosts(null)" data-t="global_feed">📡 GLOBAL FEED</button>
+            <h3 data-t="public_channels">PUBLIC CHANNELS</h3>
+            <div id="publics-list"></div>
+        </div>
+        <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()" data-t="admin_console">🛠 ADMIN CONSOLE</button>
+    </aside>
+
+    <main class="feed">
+        <div id="admin-panel" class="admin-panel hidden">
+            <div class="admin-header">
+                <h2 data-t="terminal_access">TERMINAL ACCESS</h2>
+                <button onclick="toggleAdminPanel()" data-t="close">CLOSE [X]</button>
+            </div>
+            <div class="admin-grid">
+                <!-- Создание паблика -->
+                <div class="admin-card">
+                    <h4 data-t="register_channel">REGISTER CHANNEL</h4>
+                    <input type="text" id="new-pub-name" data-t-placeholder="channel_name_placeholder">
+                    
+                    <div class="upload-area">
+                        <label for="pub-file" class="file-label" data-t="upload_avatar">📁 Upload Avatar</label>
+                        <input type="file" id="pub-file" accept="image/*" onchange="handlePubFileSelect(event)">
+                        <span id="pub-file-name" class="file-info">No file selected</span>
+                    </div>
+
+                    <label class="check-container"><input type="checkbox" id="new-pub-verify"> <span data-t="verified">Verified</span></label>
+                    <button class="btn-execute" onclick="createNewPublic()" data-t="execute">EXECUTE</button>
+                </div>
+
+                <!-- Создание поста -->
+                <div class="admin-card">
+                    <h4 data-t="broadcast_signal">BROADCAST SIGNAL</h4>
+                    <select id="post-public-id"></select>
+                    <input type="text" id="post-title" data-t-placeholder="subject_placeholder">
+                    <textarea id="post-content" data-t-placeholder="data_payload_placeholder"></textarea>
+                    
+                    <div class="upload-area">
+                        <label for="post-file" class="file-label" data-t="upload_image">📁 Upload Image</label>
+                        <input type="file" id="post-file" accept="image/*" onchange="handlePostFileSelect(event)">
+                        <span id="post-file-name" class="file-info">No file selected</span>
+                    </div>
+                    
+                    <button class="btn-execute" onclick="createNewPost()" data-t="execute">EXECUTE</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="posts-container"></div>
+    </main>
+</div>
+
+<div id="auth-modal" class="modal hidden">
+    <div class="modal-content">
+        <h2 id="auth-title">CONNECTION</h2>
+        <input type="text" id="auth-username-input" data-t-placeholder="callsign_placeholder">
+        <input type="password" id="auth-password" data-t-placeholder="encryption_placeholder">
+        <button class="btn-primary" onclick="handleAuth()" data-t="establish">ESTABLISH</button>
+        <p class="toggle-text" onclick="toggleAuthMode()" data-t="switch_auth">Switch Mode</p>
+        <button class="btn-close" onclick="closeModal()" data-t="abort">ABORT</button>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

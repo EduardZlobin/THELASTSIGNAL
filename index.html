@@ -6,93 +6,304 @@
     <title>The Last Signal | ELF-Band Transmission</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-
-<header class="main-header">
-    <div class="header-content">
-        <div class="logo-area" onclick="location.reload()">
-            <h1>THE LAST SIGNAL</h1>
-            <p class="subtitle">ELF-BAND TRANSMISSION</p>
-        </div>
-        
-        <div class="header-right">
-            <div class="lang-switch">
-                <span onclick="setLanguage('en')" id="lang-en">EN</span>
-                <span style="color: #444;">|</span>
-                <span onclick="setLanguage('ru')" id="lang-ru">RU</span>
-            </div>
-            <div id="auth-section"></div>
-        </div>
+    <div class="bg">
+        <div class="fog"></div>
     </div>
-</header>
 
-<div class="app-container">
-    <aside class="sidebar">
-        <div class="sidebar-block">
-            <button class="btn-nav active" onclick="loadPosts(null)" data-t="global_feed">📡 GLOBAL FEED</button>
-            <h3 data-t="public_channels">PUBLIC CHANNELS</h3>
-            <div id="publics-list"></div>
-        </div>
-        <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()" data-t="admin_console">🛠 ADMIN CONSOLE</button>
-    </aside>
-
-    <main class="feed">
-        <div id="admin-panel" class="admin-panel hidden">
-            <div class="admin-header">
-                <h2 data-t="terminal_access">TERMINAL ACCESS</h2>
-                <button onclick="toggleAdminPanel()" data-t="close">CLOSE [X]</button>
-            </div>
-            <div class="admin-grid">
-                <!-- Создание паблика -->
-                <div class="admin-card">
-                    <h4 data-t="register_channel">REGISTER CHANNEL</h4>
-                    <input type="text" id="new-pub-name" data-t-placeholder="channel_name_placeholder">
-                    
-                    <div class="upload-area">
-                        <label for="pub-file" class="file-label" data-t="upload_avatar">📁 Upload Avatar</label>
-                        <input type="file" id="pub-file" accept="image/*" onchange="handlePubFileSelect(event)">
-                        <span id="pub-file-name" class="file-info">No file selected</span>
+    <div class="main-container">
+        <header class="main-header">
+            <div class="header-content">
+                <div class="logo-area" onclick="location.reload()">
+                    <div class="logo-icon">📡</div>
+                    <div class="logo-text">
+                        <h1>THE LAST SIGNAL</h1>
+                        <p class="subtitle">ELF-BAND TRANSMISSION</p>
                     </div>
-
-                    <label class="check-container"><input type="checkbox" id="new-pub-verify"> <span data-t="verified">Verified</span></label>
-                    <button class="btn-execute" onclick="createNewPublic()" data-t="execute">EXECUTE</button>
                 </div>
-
-                <!-- Создание поста -->
-                <div class="admin-card">
-                    <h4 data-t="broadcast_signal">BROADCAST SIGNAL</h4>
-                    <select id="post-public-id"></select>
-                    <input type="text" id="post-title" data-t-placeholder="subject_placeholder">
-                    <textarea id="post-content" data-t-placeholder="data_payload_placeholder"></textarea>
-                    
-                    <div class="upload-area">
-                        <label for="post-file" class="file-label" data-t="upload_image">📁 Upload Image</label>
-                        <input type="file" id="post-file" accept="image/*" onchange="handlePostFileSelect(event)">
-                        <span id="post-file-name" class="file-info">No file selected</span>
+                
+                <div class="header-right">
+                    <div class="lang-switch">
+                        <button class="lang-btn" onclick="setLanguage('en')" id="lang-en">EN</button>
+                        <div class="lang-divider"></div>
+                        <button class="lang-btn" onclick="setLanguage('ru')" id="lang-ru">RU</button>
                     </div>
-                    
-                    <button class="btn-execute" onclick="createNewPost()" data-t="execute">EXECUTE</button>
+                    <div id="auth-section"></div>
                 </div>
             </div>
+        </header>
+
+        <div class="app-wrapper">
+            <aside class="sidebar">
+                <div class="sidebar-block">
+                    <button class="btn-nav active" onclick="loadPosts(null)">
+                        <i class="fas fa-globe-americas"></i>
+                        <span data-t="global_feed">GLOBAL FEED</span>
+                    </button>
+                    
+                    <button class="btn-subscriptions" onclick="loadSubscriptionsFeed()">
+                        <i class="fas fa-bell"></i>
+                        <span data-t="subscriptions">SUBSCRIPTIONS</span>
+                    </button>
+                    
+                    <div class="section-title">
+                        <i class="fas fa-broadcast-tower"></i>
+                        <span data-t="public_channels">PUBLIC CHANNELS</span>
+                    </div>
+                    <div id="publics-list" class="publics-container"></div>
+                </div>
+                
+                <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()">
+                    <i class="fas fa-terminal"></i>
+                    <span data-t="admin_console">ADMIN CONSOLE</span>
+                </button>
+            </aside>
+
+            <main class="main-content">
+                <div id="user-post-area" class="user-post-panel hidden">
+                    <div class="panel-header">
+                        <i class="fas fa-paper-plane"></i>
+                        <span data-t="broadcast_signal">BROADCAST SIGNAL</span>
+                    </div>
+                    <input type="text" id="user-post-title" data-t-placeholder="subject_placeholder" class="post-input">
+                    <textarea id="user-post-content" data-t-placeholder="data_payload_placeholder" class="post-textarea"></textarea>
+                    <div class="post-actions-row">
+                        <div class="upload-area user-upload" onclick="document.getElementById('user-post-file-hidden').click()">
+                            <label class="file-label">
+                                <i class="fas fa-image"></i>
+                                <span data-t="upload_image">UPLOAD IMAGE</span>
+                            </label>
+                            <input type="file" id="user-post-file-hidden" accept="image/*" style="display:none" onchange="handleUserFileSelect(event)">
+                            <span id="user-file-info" class="file-info">No file selected</span>
+                        </div>
+                        <button class="btn-execute send-btn" onclick="createUserPost()">
+                            <i class="fas fa-paper-plane"></i>
+                            <span data-t="send">SEND</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="admin-panel" class="admin-panel hidden">
+                    <div class="admin-header">
+                        <div class="admin-title">
+                            <i class="fas fa-terminal"></i>
+                            <span data-t="terminal_access">TERMINAL ACCESS</span>
+                        </div>
+                        <button class="btn-close-admin" onclick="toggleAdminPanel()">
+                            <i class="fas fa-times"></i>
+                            <span data-t="close">CLOSE</span>
+                        </button>
+                    </div>
+                    
+                    <div class="admin-grid">
+                        <div class="admin-card">
+                            <div class="admin-card-header">
+                                <i class="fas fa-plus-circle"></i>
+                                <span data-t="register_channel">REGISTER CHANNEL</span>
+                            </div>
+                            <input type="text" id="new-pub-name" data-t-placeholder="channel_name_placeholder" class="admin-input">
+                            <div class="upload-area" onclick="document.getElementById('pub-file-hidden').click()">
+                                <label class="file-label">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <span data-t="upload_avatar">UPLOAD AVATAR</span>
+                                </label>
+                                <input type="file" id="pub-file-hidden" accept="image/*" style="display:none" onchange="handlePubFileSelect(event)">
+                                <span id="pub-file-name" class="file-info">No file selected</span>
+                            </div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="new-pub-verify">
+                                <span class="checkmark"></span>
+                                <span data-t="verified">Verified</span>
+                            </label>
+                            <button class="btn-execute" onclick="createNewPublic()">
+                                <i class="fas fa-play"></i>
+                                <span data-t="execute">EXECUTE</span>
+                            </button>
+                        </div>
+
+                        <div class="admin-card">
+                            <div class="admin-card-header">
+                                <i class="fas fa-satellite"></i>
+                                <span data-t="broadcast_signal">BROADCAST SIGNAL</span>
+                            </div>
+                            <select id="post-public-id" class="admin-select"></select>
+                            <input type="text" id="post-title" data-t-placeholder="subject_placeholder" class="admin-input">
+                            <textarea id="post-content" data-t-placeholder="data_payload_placeholder" class="admin-textarea"></textarea>
+                            <div class="upload-area" onclick="document.getElementById('post-file-hidden').click()">
+                                <label class="file-label">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <span data-t="upload_image">UPLOAD IMAGE</span>
+                                </label>
+                                <input type="file" id="post-file-hidden" accept="image/*" style="display:none" onchange="handlePostFileSelect(event)">
+                                <span id="post-file-name" class="file-info">No file selected</span>
+                            </div>
+                            <button class="btn-execute" onclick="createNewPost()">
+                                <i class="fas fa-play"></i>
+                                <span data-t="execute">EXECUTE</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="posts-container" class="posts-container"></div>
+            </main>
         </div>
-
-        <div id="posts-container"></div>
-    </main>
-</div>
-
-<div id="auth-modal" class="modal hidden">
-    <div class="modal-content">
-        <h2 id="auth-title">CONNECTION</h2>
-        <input type="text" id="auth-username-input" data-t-placeholder="callsign_placeholder">
-        <input type="password" id="auth-password" data-t-placeholder="encryption_placeholder">
-        <button class="btn-primary" onclick="handleAuth()" data-t="establish">ESTABLISH</button>
-        <p class="toggle-text" onclick="toggleAuthMode()" data-t="switch_auth">Switch Mode</p>
-        <button class="btn-close" onclick="closeModal()" data-t="abort">ABORT</button>
     </div>
-</div>
 
-<script src="script.js"></script>
+    <div id="auth-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-icon">
+                    <i class="fas fa-signal"></i>
+                </div>
+                <h2 id="auth-title" data-t="connection">CONNECTION</h2>
+            </div>
+            
+            <div class="modal-body">
+                <div class="input-group">
+                    <i class="fas fa-user-astronaut"></i>
+                    <input type="text" id="auth-username-input" data-t-placeholder="callsign_placeholder" placeholder="CALLSIGN">
+                </div>
+                <div class="input-group">
+                    <i class="fas fa-key"></i>
+                    <input type="password" id="auth-password" data-t-placeholder="encryption_placeholder" placeholder="ENCRYPTION KEY">
+                </div>
+                
+                <button class="btn-primary modal-btn" onclick="handleAuth()">
+                    <i class="fas fa-link"></i>
+                    <span id="auth-button-text">ESTABLISH</span>
+                </button>
+                
+                <p class="modal-toggle" onclick="toggleAuthMode()">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span id="toggle-text">Switch to Register</span>
+                </p>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal()">
+                    <i class="fas fa-ban"></i>
+                    <span data-t="abort">ABORT</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="profile-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeProfileModal()"></div>
+        <div class="modal-content profile-modal-content">
+            <div class="profile-header">
+                <div class="profile-avatar-container">
+                    <img id="profile-avatar-img" src="" alt="Profile Avatar" class="profile-avatar-large">
+                    <div id="profile-avatar-upload" class="avatar-upload-overlay hidden">
+                        <i class="fas fa-camera"></i>
+                        <span>Change Avatar</span>
+                    </div>
+                    <input type="file" id="profile-avatar-file" accept="image/*" style="display:none" onchange="uploadProfileAvatar(event)">
+                </div>
+                <div class="profile-info">
+                    <div class="profile-name-rating">
+                        <div class="profile-name">
+                            <h2 id="profile-username">@username</h2>
+                            <span id="profile-role" class="role-badge role-user">USER</span>
+                        </div>
+                        <div class="profile-rating">
+                            <button class="rating-btn rating-down" onclick="rateUser('down')">
+                                <i class="fas fa-arrow-down"></i>
+                            </button>
+                            <span class="rating-score" id="profile-rating-score">0</span>
+                            <button class="rating-btn rating-up" onclick="rateUser('up')">
+                                <i class="fas fa-arrow-up"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="profile-stats">
+                        <div class="stat">
+                            <span class="stat-number" id="profile-posts-count">0</span>
+                            <span class="stat-label" data-t="posts">Posts</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="profile-comments-count">0</span>
+                            <span class="stat-label" data-t="responses">Comments</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="profile-subscriptions-count">0</span>
+                            <span class="stat-label" data-t="following">Following</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="profile-followers-count">0</span>
+                            <span class="stat-label" data-t="followers">Followers</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="profile-bio-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-user-circle"></i> ABOUT</h3>
+                    <button id="edit-bio-btn" class="btn-edit" onclick="toggleBioEdit()">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                </div>
+                <div id="profile-bio-display" class="profile-bio"></div>
+                <div id="profile-bio-edit" class="profile-bio-edit hidden">
+                    <textarea id="profile-bio-textarea" placeholder="Tell others about yourself..."></textarea>
+                    <div class="bio-edit-actions">
+                        <button class="btn-secondary" onclick="toggleBioEdit()">Cancel</button>
+                        <button class="btn-primary" onclick="saveProfileBio()">Save</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="profile-comments-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-comments"></i> RECENT ACTIVITY</h3>
+                    <div class="comments-filter">
+                        <button id="filter-new" class="filter-btn active" onclick="changeCommentsFilter('new')">
+                            <i class="fas fa-clock"></i> New
+                        </button>
+                        <button id="filter-popular" class="filter-btn" onclick="changeCommentsFilter('popular')">
+                            <i class="fas fa-fire"></i> Popular
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="profile-comments-container" class="profile-comments-container">
+                </div>
+                
+                <div class="comments-pagination">
+                    <button id="load-more-comments" class="btn-secondary" onclick="loadMoreComments()">
+                        <i class="fas fa-arrow-down"></i> Load More
+                    </button>
+                </div>
+            </div>
+            
+            <div class="profile-reviews-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-star"></i> <span data-t="reviews">REVIEWS</span></h3>
+                </div>
+                
+                <div id="profile-reviews-container" class="profile-reviews-container">
+                </div>
+                
+                <div class="review-input">
+                    <textarea id="review-text" data-t-placeholder="write_review" placeholder="Write a review about this user..."></textarea>
+                    <button class="btn-primary" onclick="submitReview()" data-t="submit_review">Submit Review</button>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeProfileModal()">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>

@@ -38,38 +38,41 @@
 
         <div class="app-wrapper">
             <aside class="sidebar">
-                <div class="sidebar-block">
-                    <button class="btn-nav active" id="btn-global" onclick="loadPosts(null)">
-                        <i class="fas fa-globe-americas"></i>
-                        <span data-t="global_feed">GLOBAL FEED</span>
-                    </button>
-                    
-                    <button class="btn-subscriptions" id="btn-subs" onclick="loadSubscriptionsFeed()">
-                        <i class="fas fa-bell"></i>
-                        <span data-t="subscriptions">SUBSCRIPTIONS</span>
-                    </button>
+    <div class="sidebar-block">
+            <!-- ЗАГОЛОВОК БОКОВОЙ ПАНЕЛИ -->
+    <div class="sidebar-main-title">
+        <i class="fas fa-layer-group"></i>
+        <span data-t="terminal_menu">TERMINAL MENU</span>
+    </div>
 
-                    <!-- КНОПКА ОБЗОРА ВСЕХ КАНАЛОВ -->
-                    <button class="btn-discovery" id="btn-discovery" onclick="loadDiscoveryView()">
-                        <i class="fas fa-search-location"></i>
-                        <span data-t="find_channels">FIND CHANNELS</span>
-                    </button>
-                    
-                    <div class="section-title">
-                        <i class="fas fa-broadcast-tower"></i>
-                        <span data-t="my_channels">MY CHANNELS</span>
-                    </div>
-                    <div id="publics-list" class="publics-container">
-                        <!-- Сюда JS подгрузит только те каналы, на которые подписан юзер -->
-                    </div>
-                </div>
-                
-                <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()">
-                    <i class="fas fa-terminal"></i>
-                    <span data-t="admin_console">ADMIN CONSOLE</span>
-                </button>
-            </aside>
+        <button class="btn-nav active" id="btn-global" onclick="loadPosts(null)">
+            <i class="fas fa-globe-americas"></i>
+            <span data-t="global_feed">GLOBAL FEED</span>
+        </button>
+        
+        <button class="btn-subscriptions" id="btn-subs" onclick="loadPosts(null, false, true)">
+            <i class="fas fa-bell"></i>
+            <span data-t="subscriptions">SUBSCRIPTIONS</span>
+        </button>
 
+        <button class="btn-discovery" id="btn-discovery" onclick="loadDiscoveryView()">
+            <i class="fas fa-search-location"></i>
+            <span data-t="find_channels">FIND CHANNELS</span>
+        </button>
+        
+        <div class="section-title">
+            <i class="fas fa-broadcast-tower"></i>
+            <span data-t="my_channels">MY CHANNELS</span>
+        </div>
+        <div id="publics-list" class="publics-container"></div>
+    </div>
+    
+    <!-- Кнопка админа теперь будет чуть ниже, отдельно -->
+    <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()">
+        <i class="fas fa-terminal"></i>
+        <span data-t="admin_console">ADMIN CONSOLE</span>
+    </button>
+</aside>
             <main class="main-content">
                 <!-- Панель создания поста пользователем (в пабликах) -->
                 <div id="user-post-area" class="user-post-panel hidden">
@@ -160,7 +163,20 @@
 
                 <!-- Контейнер для постов или обзора каналов -->
                 <div id="posts-container" class="posts-container"></div>
+                <div id="load-indicator" class="loading hidden">CONNECTING TO SATELLITE...</div>
             </main>
+            <aside class="right-sidebar">
+                <div class="sidebar-block">
+                    <div class="sidebar-main-title">
+                        <i class="fas fa-satellite-dish"></i>
+                        <span data-t="active_nodes">ACTIVE NODES</span>
+                    </div>
+                    <div id="online-users-list" class="online-users-container">
+                        <!-- Сюда JS будет подставлять юзеров в реальном времени -->
+                    </div>
+                </div>
+            </aside>
+        </div> <!-- Конец app-wrapper -->
         </div>
     </div>
 
@@ -215,6 +231,7 @@
                 <div class="profile-main-info">
                     <div class="profile-nick-row">
                         <h2 id="profile-username">@USER</h2>
+                        <div id="profile-status-dot" class="status-indicator"></div> <!-- Статус здесь -->
                         <span id="profile-role" class="role-badge">USER</span>
                     </div>
                     <div id="profile-bio-display" class="profile-bio-mini"></div>

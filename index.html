@@ -39,21 +39,29 @@
         <div class="app-wrapper">
             <aside class="sidebar">
                 <div class="sidebar-block">
-                    <button class="btn-nav active" onclick="loadPosts(null)">
+                    <button class="btn-nav active" id="btn-global" onclick="loadPosts(null)">
                         <i class="fas fa-globe-americas"></i>
                         <span data-t="global_feed">GLOBAL FEED</span>
                     </button>
                     
-                    <button class="btn-subscriptions" onclick="loadSubscriptionsFeed()">
+                    <button class="btn-subscriptions" id="btn-subs" onclick="loadSubscriptionsFeed()">
                         <i class="fas fa-bell"></i>
                         <span data-t="subscriptions">SUBSCRIPTIONS</span>
+                    </button>
+
+                    <!-- КНОПКА ОБЗОРА ВСЕХ КАНАЛОВ -->
+                    <button class="btn-discovery" id="btn-discovery" onclick="loadDiscoveryView()">
+                        <i class="fas fa-search-location"></i>
+                        <span data-t="find_channels">FIND CHANNELS</span>
                     </button>
                     
                     <div class="section-title">
                         <i class="fas fa-broadcast-tower"></i>
-                        <span data-t="public_channels">PUBLIC CHANNELS</span>
+                        <span data-t="my_channels">MY CHANNELS</span>
                     </div>
-                    <div id="publics-list" class="publics-container"></div>
+                    <div id="publics-list" class="publics-container">
+                        <!-- Сюда JS подгрузит только те каналы, на которые подписан юзер -->
+                    </div>
                 </div>
                 
                 <button id="admin-btn" class="btn-admin hidden" onclick="toggleAdminPanel()">
@@ -63,6 +71,7 @@
             </aside>
 
             <main class="main-content">
+                <!-- Панель создания поста пользователем (в пабликах) -->
                 <div id="user-post-area" class="user-post-panel hidden">
                     <div class="panel-header">
                         <i class="fas fa-paper-plane"></i>
@@ -86,6 +95,7 @@
                     </div>
                 </div>
 
+                <!-- Консоль администратора -->
                 <div id="admin-panel" class="admin-panel hidden">
                     <div class="admin-header">
                         <div class="admin-title">
@@ -148,21 +158,20 @@
                     </div>
                 </div>
 
+                <!-- Контейнер для постов или обзора каналов -->
                 <div id="posts-container" class="posts-container"></div>
             </main>
         </div>
     </div>
 
+    <!-- Модальное окно Входа/Регистрации -->
     <div id="auth-modal" class="modal hidden">
         <div class="modal-overlay" onclick="closeModal()"></div>
         <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-icon">
-                    <i class="fas fa-signal"></i>
-                </div>
+                <div class="modal-icon"><i class="fas fa-signal"></i></div>
                 <h2 id="auth-title" data-t="connection">CONNECTION</h2>
             </div>
-            
             <div class="modal-body">
                 <div class="input-group">
                     <i class="fas fa-user-astronaut"></i>
@@ -172,135 +181,83 @@
                     <i class="fas fa-key"></i>
                     <input type="password" id="auth-password" data-t-placeholder="encryption_placeholder" placeholder="ENCRYPTION KEY">
                 </div>
-                
                 <button class="btn-primary modal-btn" onclick="handleAuth()">
                     <i class="fas fa-link"></i>
                     <span id="auth-button-text">ESTABLISH</span>
                 </button>
-                
                 <p class="modal-toggle" onclick="toggleAuthMode()">
                     <i class="fas fa-exchange-alt"></i>
                     <span id="toggle-text">Switch to Register</span>
                 </p>
             </div>
-            
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeModal()">
-                    <i class="fas fa-ban"></i>
-                    <span data-t="abort">ABORT</span>
+                    <i class="fas fa-ban"></i> <span data-t="abort">ABORT</span>
                 </button>
             </div>
         </div>
     </div>
 
+    <!-- НОВОЕ КОМПАКТНОЕ МОДАЛЬНОЕ ОКНО ПРОФИЛЯ -->
     <div id="profile-modal" class="modal hidden">
         <div class="modal-overlay" onclick="closeProfileModal()"></div>
-        <div class="modal-content profile-modal-content">
-            <div class="profile-header">
-                <div class="profile-avatar-container">
-                    <img id="profile-avatar-img" src="" alt="Profile Avatar" class="profile-avatar-large">
-                    <div id="profile-avatar-upload" class="avatar-upload-overlay hidden">
-                        <i class="fas fa-camera"></i>
-                        <span>Change Avatar</span>
+        <div class="modal-content profile-compact-content">
+            <!-- Верхняя панель: Аватар + Главная инфо -->
+            <div class="profile-top-bar">
+                <div class="profile-avatar-wrapper">
+                    <img id="profile-avatar-img" src="" class="profile-avatar-compact">
+                    <div id="profile-avatar-upload" class="avatar-edit-icon hidden">
+                        <i class="fas fa-pen"></i>
                     </div>
                     <input type="file" id="profile-avatar-file" accept="image/*" style="display:none" onchange="uploadProfileAvatar(event)">
                 </div>
-                <div class="profile-info">
-                    <div class="profile-name-rating">
-                        <div class="profile-name">
-                            <h2 id="profile-username">@username</h2>
-                            <span id="profile-role" class="role-badge role-user">USER</span>
-                        </div>
-                        <div class="profile-rating">
-                            <button class="rating-btn rating-down" onclick="rateUser('down')">
-                                <i class="fas fa-arrow-down"></i>
-                            </button>
-                            <span class="rating-score" id="profile-rating-score">0</span>
-                            <button class="rating-btn rating-up" onclick="rateUser('up')">
-                                <i class="fas fa-arrow-up"></i>
-                            </button>
-                        </div>
+                
+                <div class="profile-main-info">
+                    <div class="profile-nick-row">
+                        <h2 id="profile-username">@USER</h2>
+                        <span id="profile-role" class="role-badge">USER</span>
                     </div>
-                    <div class="profile-stats">
-                        <div class="stat">
-                            <span class="stat-number" id="profile-posts-count">0</span>
-                            <span class="stat-label" data-t="posts">Posts</span>
-                        </div>
-                        <div class="stat">
-                            <span class="stat-number" id="profile-comments-count">0</span>
-                            <span class="stat-label" data-t="responses">Comments</span>
-                        </div>
-                        <div class="stat">
-                            <span class="stat-number" id="profile-subscriptions-count">0</span>
-                            <span class="stat-label" data-t="following">Following</span>
-                        </div>
-                        <div class="stat">
-                            <span class="stat-number" id="profile-followers-count">0</span>
-                            <span class="stat-label" data-t="followers">Followers</span>
-                        </div>
+                    <div id="profile-bio-display" class="profile-bio-mini"></div>
+                    <div id="profile-bio-edit" class="profile-bio-edit hidden">
+                        <textarea id="profile-bio-textarea"></textarea>
+                        <button class="btn-primary btn-xs" onclick="saveProfileBio()">SAVE</button>
                     </div>
+                    <button id="edit-bio-btn" class="bio-edit-link" onclick="toggleBioEdit()">[ Edit Bio ]</button>
+                </div>
+
+                <div class="profile-rating-pill">
+                    <button class="rate-btn" onclick="rateUser('down')"><i class="fas fa-chevron-down"></i></button>
+                    <span id="profile-rating-score">0</span>
+                    <button class="rate-btn" onclick="rateUser('up')"><i class="fas fa-chevron-up"></i></button>
                 </div>
             </div>
-            
-            <div class="profile-bio-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-user-circle"></i> ABOUT</h3>
-                    <button id="edit-bio-btn" class="btn-edit" onclick="toggleBioEdit()">
-                        <i class="fas fa-edit"></i> Edit
-                    </button>
+
+            <!-- Сетка статистики (в одну строку) -->
+            <div class="profile-stats-bar">
+                <div class="mini-stat"><strong>Posts:</strong> <span id="profile-posts-count">0</span></div>
+                <div class="mini-stat"><strong>Activity:</strong> <span id="profile-comments-count">0</span></div>
+                <div class="mini-stat"><strong>Followers:</strong> <span id="profile-followers-count">0</span></div>
+            </div>
+
+            <!-- Две колонки: Активность и Отзывы -->
+            <div class="profile-columns">
+                <div class="profile-col">
+                    <div class="col-header"><i class="fas fa-stream"></i> RECENT LOGS</div>
+                    <div id="profile-comments-container" class="compact-scroll-area"></div>
+                    <button id="load-more-comments" class="btn-load-more" onclick="loadMoreComments()">LOAD MORE</button>
                 </div>
-                <div id="profile-bio-display" class="profile-bio"></div>
-                <div id="profile-bio-edit" class="profile-bio-edit hidden">
-                    <textarea id="profile-bio-textarea" placeholder="Tell others about yourself..."></textarea>
-                    <div class="bio-edit-actions">
-                        <button class="btn-secondary" onclick="toggleBioEdit()">Cancel</button>
-                        <button class="btn-primary" onclick="saveProfileBio()">Save</button>
+                
+                <div class="profile-col">
+                    <div class="col-header"><i class="fas fa-star"></i> REVIEWS</div>
+                    <div id="profile-reviews-container" class="compact-scroll-area"></div>
+                    <div class="mini-review-input">
+                        <input type="text" id="review-text" data-t-placeholder="write_review" placeholder="Write review...">
+                        <button onclick="submitReview()"><i class="fas fa-paper-plane"></i></button>
                     </div>
                 </div>
             </div>
-            
-            <div class="profile-comments-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-comments"></i> RECENT ACTIVITY</h3>
-                    <div class="comments-filter">
-                        <button id="filter-new" class="filter-btn active" onclick="changeCommentsFilter('new')">
-                            <i class="fas fa-clock"></i> New
-                        </button>
-                        <button id="filter-popular" class="filter-btn" onclick="changeCommentsFilter('popular')">
-                            <i class="fas fa-fire"></i> Popular
-                        </button>
-                    </div>
-                </div>
-                
-                <div id="profile-comments-container" class="profile-comments-container">
-                </div>
-                
-                <div class="comments-pagination">
-                    <button id="load-more-comments" class="btn-secondary" onclick="loadMoreComments()">
-                        <i class="fas fa-arrow-down"></i> Load More
-                    </button>
-                </div>
-            </div>
-            
-            <div class="profile-reviews-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-star"></i> <span data-t="reviews">REVIEWS</span></h3>
-                </div>
-                
-                <div id="profile-reviews-container" class="profile-reviews-container">
-                </div>
-                
-                <div class="review-input">
-                    <textarea id="review-text" data-t-placeholder="write_review" placeholder="Write a review about this user..."></textarea>
-                    <button class="btn-primary" onclick="submitReview()" data-t="submit_review">Submit Review</button>
-                </div>
-            </div>
-            
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeProfileModal()">
-                    <i class="fas fa-times"></i> Close
-                </button>
-            </div>
+
+            <button class="btn-close-compact" onclick="closeProfileModal()"><i class="fas fa-times"></i></button>
         </div>
     </div>
 

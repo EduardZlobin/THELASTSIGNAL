@@ -50,7 +50,7 @@
             <span data-t="global_feed">GLOBAL FEED</span>
         </button>
         
-        <button class="btn-subscriptions" id="btn-subs" onclick="loadPosts(null, false, true)">
+        <button class="btn-subscriptions" id="btn-subs" onclick="loadSubscriptionsFeed()">
             <i class="fas fa-bell"></i>
             <span data-t="subscriptions">SUBSCRIPTIONS</span>
         </button>
@@ -163,7 +163,6 @@
 
                 <!-- Контейнер для постов или обзора каналов -->
                 <div id="posts-container" class="posts-container"></div>
-                <div id="load-indicator" class="loading hidden">CONNECTING TO SATELLITE...</div>
             </main>
             <aside class="right-sidebar">
                 <div class="sidebar-block">

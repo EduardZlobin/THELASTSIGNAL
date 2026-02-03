@@ -3,15 +3,6 @@ const SB_URL = 'https://adzxwgaoozuoamqqwkcd.supabase.co';
 const SB_KEY = 'sb_publishable_MxwhklaWPh4uOnvl_WI4eg_ceEre8pi';
 const sb = supabase.createClient(SB_URL, SB_KEY);
 let onlineUsers = {}; // Хранилище для активных юзеров
-let postsPage = 0;
-const POSTS_PER_PAGE = 5;
-let isLoadingPosts = false;
-let hasMorePosts = true;
-
-let channelsPage = 0;
-const CHANNELS_PER_PAGE = 18;
-let isLoadingChannels = false;
-let hasMoreChannels = true;
 
 let currentUser = null;
 let userProfile = null;
@@ -175,103 +166,120 @@ async function sendToTelegram(title, content, imageUrl, publicName, authorName =
 // --- СИСТЕМА ПАБЛИКОВ (Твоя новая идея) ---
 
 // 1. Загрузка только ПОДПИСАННЫХ каналов в боковую панель
-async function checkUser() {
+async function loadPublics() {
     try {
-        const { data: { session } } = await sb.auth.getSession();
-        if (session) {
-            currentUser = session.user;
-            const { data: profile, error } = await sb.from('profiles')
-                .select('*')
-                .eq('id', currentUser.id)
-                .single();
-            
-            if (profile) {
-                userProfile = profile;
-                await initPresence(); // Запуск онлайна
-            }
-        } else {
-            currentUser = null;
-            userProfile = null;
-        }
-        await loadPublics(); 
+        const { data: publics, error } = await sb.from('publics').select('*').order('name');
+        if (error) throw error;
 
-    } catch (e) {
-        console.error("Auth check error:", e);
-    } finally {
-        updateUI(); // Обновляем шапку и сайдбар
-    }
+        const list = document.getElementById('publics-list');
+        const select = document.getElementById('post-public-id');
+
+        // Для админки всегда полный список
+        if (select) {
+            select.innerHTML = '<option value="">' + (currentLang === 'ru' ? 'Выберите канал...' : 'Select channel...') + '</option>';
+            publics.forEach(pub => { select.innerHTML += `<option value="${pub.id}">${pub.name}</option>`; });
+        }
+
+        // В сайдбаре только подписки
+        if (list) {
+            if (!currentUser) {
+                list.innerHTML = `<div style="padding:10px; font-size:12px; color:var(--text-muted)">${currentLang === 'ru' ? 'Войдите для подписок' : 'Login to see follows'}</div>`;
+                return;
+            }
+
+            const { data: subs } = await sb.from('user_subscriptions').select('public_id').eq('user_id', userProfile.id);
+            const subIds = subs.map(s => s.public_id);
+            const myPublics = publics.filter(p => subIds.includes(p.id));
+
+            if (myPublics.length === 0) {
+                list.innerHTML = `<div style="padding:10px; font-size:11px; color:var(--text-muted)">${currentLang === 'ru' ? 'Нет подписок' : 'No subscriptions'}</div>`;
+            } else {
+                list.innerHTML = myPublics.map(pub => `
+                    <div class="channel-item" onclick="loadPosts(${pub.id})">
+                        <img src="${pub.avatar_url || 'https://via.placeholder.com/32'}" class="channel-avatar">
+                        <span class="channel-name">${pub.name}</span>
+                        ${pub.is_verified ? '<i class="fas fa-check-circle channel-verified"></i>' : ''}
+                    </div>
+                `).join('');
+            }
+        }
+    } catch (e) { console.error(e); }
 }
 
 // 2. ОБЗОР КАНАЛОВ (Микро-профили вместо ленты)
-async function loadDiscoveryView(append = false) {
-    if (isLoadingChannels) return;
-    if (append && !hasMoreChannels) return;
-
-    if (!append) {
-        channelsPage = 0;
-        hasMoreChannels = true;
-        saveScrollPosition();
-        const container = document.getElementById('posts-container');
-        container.innerHTML = `<div class="loading">SCANNING AIRWAVES...</div>`;
-    }
-
-    isLoadingChannels = true;
+async function loadDiscoveryView() {
+    saveScrollPosition();
     isViewingDiscovery = true;
     isViewingSubscriptions = false;
     currentPublicId = null;
 
+    const container = document.getElementById('posts-container');
+    const userPanel = document.getElementById('user-post-area');
+    if (userPanel) userPanel.classList.add('hidden');
+
+    document.querySelectorAll('.btn-nav, .btn-subscriptions').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-discovery').classList.add('active');
+
+    container.innerHTML = `<div class="loading">${currentLang === 'ru' ? 'СКАНИРОВАНИЕ ЭФИРА...' : 'SCANNING AIRWAVES...'}</div>`;
+
     try {
-        const from = channelsPage * CHANNELS_PER_PAGE;
-        const to = from + CHANNELS_PER_PAGE - 1;
+        const { data: publics } = await sb.from('publics').select('*').order('is_verified', {ascending: false});
+        const { data: allSubs } = await sb.from('user_subscriptions').select('public_id');
+        const { data: lastPosts } = await sb.from('posts').select('public_id, title').order('created_at', {ascending: false});
 
-        const { data: publics } = await sb.from('publics')
-            .select('*')
-            .order('is_verified', {ascending: false})
-            .range(from, to);
-
-        if (!publics || publics.length < CHANNELS_PER_PAGE) hasMoreChannels = false;
-
-        const container = document.getElementById('posts-container');
-        
-        if (!append) {
-            container.innerHTML = `
-                <div class="discovery-header-row">
-                    <button class="back-btn" style="margin-bottom:0" onclick="loadPosts(null)">
-                        <i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}
-                    </button>
-                    <div class="search-container">
-                        <i class="fas fa-search"></i>
-                        <input type="text" class="discovery-search-input" placeholder="${i18n[currentLang].search_channels}" oninput="filterPublics(this.value)">
-                    </div>
+        // Создаем шапку с поиском
+        let html = `
+            <div class="discovery-header-row">
+                <button class="back-btn" style="margin-bottom:0" onclick="loadPosts(null)">
+                    <i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}
+                </button>
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" 
+                           class="discovery-search-input" 
+                           placeholder="${i18n[currentLang].search_channels}" 
+                           oninput="filterPublics(this.value)">
                 </div>
-                <div class="public-grid" id="public-grid"></div>
-            `;
-        }
+            </div>
+            <div class="public-grid" id="public-grid">
+        `;
 
-        const grid = document.getElementById('public-grid');
-        let html = '';
-        
         for (const pub of publics) {
+            const subCount = allSubs.filter(s => s.public_id === pub.id).length;
+            const lastPost = lastPosts.find(p => p.public_id === pub.id);
             const isSubscribed = currentUser ? await checkSubscription(pub.id) : false;
+
             html += `
                 <div class="public-card" data-name="${pub.name.toLowerCase()}">
                     <div class="public-card-header">
                         <img src="${pub.avatar_url || 'https://via.placeholder.com/60'}" class="public-card-avatar" onclick="loadPosts(${pub.id})">
                         <div class="public-card-info">
-                            <div class="public-card-name" onclick="loadPosts(${pub.id})">${pub.name}</div>
-                            <div class="public-card-subs">${i18n[currentLang].subscribers}</div>
+                            <div class="public-card-name" onclick="loadPosts(${pub.id})">
+                                ${pub.name} ${pub.is_verified ? '<i class="fas fa-check-circle channel-verified"></i>' : ''}
+                            </div>
+                            <div class="public-card-subs">${subCount} ${i18n[currentLang].subscribers}</div>
                         </div>
                     </div>
-                    <button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" style="width:100%" onclick="toggleDiscoverySub(${pub.id})">
-                        ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
-                    </button>
-                </div>`;
+                    
+                    <div class="public-card-last-post">
+                        <span class="last-post-label">${i18n[currentLang].last_transmission}</span>
+                        <span class="last-post-title">${lastPost ? lastPost.title : i18n[currentLang].no_recent_posts}</span>
+                    </div>
+
+                    <div class="public-card-actions">
+                        <button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" style="width:100%" onclick="toggleDiscoverySub(${pub.id})">
+                            <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
+                            ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+                        </button>
+                    </div>
+                </div>
+            `;
         }
-        
-        grid.insertAdjacentHTML('beforeend', html);
-        channelsPage++;
+
+        html += `</div>`;
+        container.innerHTML = html;
+        restoreScrollPosition();
     } catch (e) { console.error(e); }
-    finally { isLoadingChannels = false; }
 }
 
 // НОВАЯ ФУНКЦИЯ ДЛЯ ФИЛЬТРАЦИИ КАРТОЧЕК
@@ -451,22 +459,16 @@ async function checkUser() {
             
             if (profile) {
                 userProfile = profile;
-                await initPresence();
-                
-                // --- ВОТ ЭТО ИСПРАВИТ ПРОБЛЕМУ ---
-                await loadPublics(); // <--- ДОБАВИТЬ ЭТУ СТРОКУ
-                // ---------------------------------
+                await initPresence(); // Запуск онлайна
             }
         } else {
             currentUser = null;
             userProfile = null;
-            // Также вызываем, чтобы очистить список, если пользователь вышел
-            loadPublics(); 
         }
     } catch (e) {
         console.error("Auth check error:", e);
     } finally {
-        updateUI(); 
+        updateUI(); // Обновляем шапку и сайдбар в любом случае
     }
 }
 
@@ -483,142 +485,94 @@ async function uploadToStorage(file, bucket) {
     return sb.storage.from(bucket).getPublicUrl(name).data.publicUrl;
 }
 
-// УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ЗАГРУЗКИ ПОСТОВ
-async function loadPosts(pubId = null, append = false, onlySubs = false) {
-    if (isLoadingPosts) return;
-    
-    // Якщо ми намагаємося довантажити (append), але постів більше немає — виходимо
-    if (append && !hasMorePosts) return;
-
-    if (!append) {
-        postsPage = 0;
-        hasMorePosts = true; // Скидаємо прапорець при новому запиті
-        isViewingSubscriptions = onlySubs;
-        saveScrollPosition();
-        const container = document.getElementById('posts-container');
-        if (container) container.innerHTML = `<div class="loading">LOADING...</div>`;
-    }
-
-    isLoadingPosts = true;
+// Посты
+async function loadPosts(pubId = null) {
+    saveScrollPosition();
     currentPublicId = pubId;
+    isViewingDiscovery = false;
+    isViewingSubscriptions = false;
+
+    document.querySelectorAll('.btn-nav, .btn-discovery, .btn-subscriptions').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-global').classList.add('active');
+
+    const container = document.getElementById('posts-container');
+    const userPanel = document.getElementById('user-post-area');
+    container.innerHTML = `<div class="loading">LOADING...</div>`;
 
     try {
         let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
+        if (pubId) query = query.eq('public_id', pubId);
+        const { data: posts } = await query;
 
-        if (pubId) {
-            query = query.eq('public_id', pubId);
-        } else if (onlySubs) {
-            const { data: subs } = await sb.from('user_subscriptions').select('public_id').eq('user_id', userProfile.id);
-            if (!subs || subs.length === 0) {
-                document.getElementById('posts-container').innerHTML = `<div class="empty-state">NO SUBSCRIPTIONS</div>`;
-                isLoadingPosts = false; return;
-            }
-            query = query.in('public_id', subs.map(s => s.public_id));
-        }
+        if (pubId && currentUser) userPanel.classList.remove('hidden'); else userPanel.classList.add('hidden');
 
-        const from = postsPage * POSTS_PER_PAGE;
-        const to = from + POSTS_PER_PAGE - 1;
+        let html = pubId ? `<button class="back-btn" onclick="loadPosts(null)"><i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}</button>` : '';
         
-        const { data: posts, error } = await query.range(from, to);
-
-        if (error) throw error;
-        
-        // Если пришло меньше, чем просили — значит посты закончились
-        if (!posts || posts.length < POSTS_PER_PAGE) {
-            hasMorePosts = false;
-        }
-
-        let html = '';
-        if ((pubId || onlySubs) && !append) {
-            html += `<button class="back-btn" onclick="loadPosts(null)">
-                <i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}</button>`;
-        }
-
-        for (let post of posts) {
-            html += await renderSinglePost(post); 
-        }
-
-        const container = document.getElementById('posts-container');
-        if (append) {
-            container.insertAdjacentHTML('beforeend', html);
+        if (!posts || posts.length === 0) {
+            html += `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
         } else {
-            container.innerHTML = html;
-            restoreScrollPosition();
+            for (let post of posts) {
+                const isSub = currentUser ? await checkSubscription(post.public_id) : false;
+                html += `
+                <div class="post-card">
+                    <h3 class="post-title">${(post.title || 'NO SUBJECT').toUpperCase()}</h3>
+                    <div class="post-header">
+                        <img src="${post.publics?.avatar_url}" class="post-avatar" onclick="loadPosts(${post.public_id})">
+                        <div class="post-meta">
+                            <div class="post-channel" onclick="loadPosts(${post.public_id})">${post.publics?.name} ${post.is_user_post ? '<span class="post-author-tag">@'+post.author_name+'</span>':''}</div>
+                            <div class="post-date">${new Date(post.created_at).toLocaleString()}</div>
+                        </div>
+                        ${currentUser ? `<button class="subscribe-btn ${isSub ? 'subscribed':''}" onclick="toggleSubscription(${post.public_id})">${isSub ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}</button>` : ''}
+                    </div>
+                    <div class="post-content">${post.content}</div>
+                    ${post.image_url ? `<img src="${post.image_url}" class="post-image" onclick="window.open(this.src)">` : ''}
+                    <div class="post-actions">
+                        <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})"><i class="fas fa-heart"></i> ${post.likes_count}</button>
+                        <button class="action-btn" onclick="toggleComments(${post.id})"><i class="fas fa-comments"></i> ${i18n[currentLang].responses}</button>
+                    </div>
+                    <div id="comments-${post.id}" class="comments-section hidden">
+                        <div id="comments-list-${post.id}"></div>
+                        <div class="comment-input">
+                            <input type="text" id="comment-input-${post.id}" placeholder="...">
+                            <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                        </div>
+                    </div>
+                </div>`;
+            }
         }
-
-        postsPage++;
-    } catch (e) {
-        console.error("General load error:", e);
-    } finally {
-        isLoadingPosts = false;
-    }
+        container.innerHTML = html;
+        restoreScrollPosition();
+    } catch (e) { console.error(e); }
 }
 
-// ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ОТРИСОВКИ ОДНОГО ПОСТА (чтобы код был чистым)
-async function renderSinglePost(post) {
-    const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
-    const topComment = comments && comments.length > 0 ? 
-        comments.reduce((prev, current) => (prev.likes_count > current.likes_count) ? prev : current) : null;
-    const commentsCount = comments ? comments.length : 0;
-    const isSubscribed = currentUser ? await checkSubscription(post.public_id) : false;
-    
-    const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
-    const authorDisplay = post.is_user_post ? `<span class="post-author-tag" onclick="openProfile('${post.author_name}')">@${post.author_name}</span>` : '';
-    
-    const formattedDate = new Date(post.created_at).toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
-        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-    });
+// Посты
+async function createNewPost() {
+    saveScrollPosition();
+    const title = document.getElementById('post-title').value.trim();
+    const content = document.getElementById('post-content').value.trim();
+    const pubId = document.getElementById('post-public-id').value;
+    if (!title || !content || !pubId) { alert("Please fill all fields"); return; }
+    try {
+        const imageUrl = await uploadToStorage(selectedPostFile, 'post-images');
+        const { error } = await sb.from('posts').insert([{
+            title, content, public_id: pubId, image_url: imageUrl,
+            author_name: userProfile.username, likes_count: 0, is_user_post: false
+        }]);
+        if (error) throw error;
 
-    return `
-    <div class="post-card" id="post-${post.id}">
-        <h3 class="post-title">${safeTitle}</h3>
-        <div class="post-header">
-            <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS'}" 
-                 class="post-avatar" alt="avatar" onclick="loadPosts(${post.publics?.id})">
-            <div class="post-meta">
-                <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
-                    ${post.publics?.name || 'Unknown'} 
-                    ${post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : ''}
-                    ${authorDisplay}
-                </div>
-                <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
-            </div>
-            ${currentUser ? `
-                <button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
-                    <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
-                    ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
-                </button>
-            ` : ''}
-        </div>
-        <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
-        ${post.image_url ? `<div class="post-image-container"><img src="${post.image_url}" class="post-image" onclick="toggleImageSize(this)"></div>` : ''}
-        <div class="post-actions">
-            <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
-                <i class="fas fa-heart"></i> ${post.likes_count || 0}
-            </button>
-            <button class="action-btn" onclick="toggleComments(${post.id})">
-                <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
-            </button>
-            ${userProfile?.is_admin ? `
-                <button class="action-btn delete-btn" onclick="deletePost(${post.id})">
-                    <i class="fas fa-trash"></i>
-                </button>
-            ` : ''}
-        </div>
-        <div id="comments-${post.id}" class="comments-section hidden">
-            ${topComment ? `
-                <div class="top-comment">
-                    <i class="fas fa-crown"></i>
-                    <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
-                </div>
-            ` : ''}
-            <div id="comments-list-${post.id}" class="comments-list"></div>
-            <div class="comment-input">
-                <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
-                <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
-            </div>
-        </div>
-    </div>`;
+        // --- Telegram Integration (Admin) ---
+        const pubSelect = document.getElementById('post-public-id');
+        const publicName = pubSelect.options[pubSelect.selectedIndex].text;
+        await sendToTelegram(title, content, imageUrl, publicName);
+        // ------------------------------------
+
+        document.getElementById('post-title').value = '';
+        document.getElementById('post-content').value = '';
+        document.getElementById('post-file-name').textContent = i18n[currentLang].upload_image;
+        selectedPostFile = null;
+        await loadPosts(currentPublicId);
+        restoreScrollPosition();
+    } catch (error) { alert("Error creating post: " + error.message); }
 }
 
 async function createUserPost() {
@@ -652,37 +606,18 @@ async function createUserPost() {
 // Подписки
 async function toggleSubscription(publicId) {
     if (!currentUser) { alert(i18n[currentLang].auth_req); showAuthModal(); return; }
-    
-    // Сохраняем позицию, чтобы экран не прыгал
     saveScrollPosition();
-    
     try {
         const { data: existingSubscription } = await sb.from('user_subscriptions')
             .select('*').eq('user_id', userProfile.id).eq('public_id', publicId).single();
-        
         if (existingSubscription) {
-            // Удаляем подписку
             await sb.from('user_subscriptions').delete().eq('id', existingSubscription.id);
         } else {
-            // Создаем подписку
             await sb.from('user_subscriptions').insert({ user_id: userProfile.id, public_id: publicId });
         }
-        
-        // ОБНОВЛЯЕМ СПИСОК СЛЕВА
-        await loadPublics();
-        
-        // Обновляем текущий вид (если мы в обзоре каналов или в ленте)
-        if (isViewingDiscovery) {
-            await loadDiscoveryView(); // Перезагружаем карточки обзора без сброса скролла (частично)
-        } else {
-            await loadPosts(currentPublicId);
-        }
-        
+        await loadPosts(currentPublicId);
         restoreScrollPosition();
-    } catch (error) { 
-        console.error('Toggle subscription error:', error); 
-        restoreScrollPosition(); 
-    }
+    } catch (error) { console.error('Toggle subscription error:', error); restoreScrollPosition(); }
 }
 
 async function checkSubscription(publicId) {
@@ -698,6 +633,221 @@ async function checkSubscription(publicId) {
         return !!data;
     } catch (error) { 
         return false; 
+    }
+}
+
+async function loadSubscriptionsFeed() {
+    if (!currentUser) { alert(i18n[currentLang].auth_req); showAuthModal(); return; }
+    isViewingSubscriptions = true;
+    try {
+        const { data: subscriptions } = await sb.from('user_subscriptions')
+            .select('public_id').eq('user_id', userProfile.id);
+        if (!subscriptions || subscriptions.length === 0) {
+            document.getElementById('posts-container').innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-bell-slash" style="font-size:48px;margin-bottom:20px;color:var(--text-muted)"></i>
+                    <h3>${currentLang === 'ru' ? 'НЕТ ПОДПИСОК' : 'NO SUBSCRIPTIONS'}</h3>
+                    <p>${currentLang === 'ru' ? 'Подпишитесь на каналы, чтобы видеть их посты здесь.' : 'Subscribe to channels to see their posts here.'}</p>
+                </div>`;
+            return;
+        }
+        const publicIds = subscriptions.map(sub => sub.public_id);
+        const { data: posts, error } = await sb.from('posts')
+            .select('*, publics(*)')
+            .in('public_id', publicIds)
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+        const container = document.getElementById('posts-container');
+        let html = `<button class="back-btn" onclick="loadPosts(null); isViewingSubscriptions = false;">
+            <i class="fas fa-arrow-left"></i>${i18n[currentLang].global_feed}</button>`;
+        if (!posts || posts.length === 0) {
+            html += `<div class="empty-state">${currentLang === 'ru' ? 'ПОСТОВ ПОКА НЕТ' : 'NO POSTS YET'}</div>`;
+            container.innerHTML = html;
+            return;
+        }
+        for (let post of posts) {
+            const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
+            const topComment = comments && comments.length > 0 ? 
+                comments.reduce((prev, current) => (prev.likes_count > current.likes_count) ? prev : current) : null;
+            const commentsCount = comments ? comments.length : 0;
+            const isSubscribed = await checkSubscription(post.public_id);
+            const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
+            const authorDisplay = post.is_user_post ? `<span class="post-author-tag">@${post.author_name}</span>` : '';
+            const postDate = new Date(post.created_at);
+            const formattedDate = postDate.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+            });
+            html += `<div class="post-card" id="post-${post.id}">
+                <h3 class="post-title">${safeTitle}</h3>
+                <div class="post-header">
+                    <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS'}" 
+                         class="post-avatar" alt="${post.publics?.name || 'Channel'}"
+                         onclick="loadPosts(${post.publics?.id})">
+                    <div class="post-meta">
+                        <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
+                            ${post.publics?.name || 'Unknown Channel'} 
+                            ${post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : ''} 
+                            ${authorDisplay}
+                        </div>
+                        <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
+                    </div>
+                    <button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
+                        <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
+                        ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+                    </button>
+                </div>
+                <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
+                ${post.image_url ? `<div class="post-image-container">
+                    <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
+                    <div class="image-controls">
+                        <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
+                            <i class="fas fa-expand-alt"></i>
+                        </button>
+                        <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                    </div>
+                </div>` : ''}
+                <div class="post-actions">
+                    <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
+                        <i class="fas fa-heart"></i> ${post.likes_count || 0}
+                    </button>
+                    <button class="action-btn" onclick="toggleComments(${post.id})">
+                        <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
+                    </button>
+                    ${userProfile?.is_admin ? `<button class="action-btn delete-btn" onclick="deletePost(${post.id})">
+                        <i class="fas fa-trash"></i> ${i18n[currentLang].terminate}
+                    </button>` : ''}
+                </div>
+                <div id="comments-${post.id}" class="comments-section hidden">
+                    ${topComment ? `<div class="top-comment">
+                        <i class="fas fa-crown top-comment-icon"></i>
+                        <div class="top-comment-text">
+                            <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
+                        </div>
+                    </div>` : ''}
+                    <div id="comments-list-${post.id}" class="comments-list"></div>
+                    <div class="comment-input">
+                        <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
+                        <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Load subscriptions feed error:', error);
+        document.getElementById('posts-container').innerHTML = `<div class="empty-state">Error loading subscriptions</div>`;
+    }
+}
+
+async function loadPosts(pubId = null) {
+    saveScrollPosition();
+    currentPublicId = pubId;
+    const container = document.getElementById('posts-container');
+    const userPanel = document.getElementById('user-post-area');
+    if (container) container.innerHTML = `<div class="loading">${currentLang === 'ru' ? 'ЗАГРУЗКА...' : 'LOADING...'}</div>`;
+    try {
+        let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
+        if (pubId) query = query.eq('public_id', pubId);
+        const { data: posts, error } = await query;
+        if (error) throw error;
+        if (pubId && currentUser) {
+            const { data: pubInfo } = await sb.from('publics').select('is_verified').eq('id', pubId).single();
+            if (pubInfo && !pubInfo.is_verified && userProfile && !userProfile.is_admin) {
+                if (userPanel) userPanel.classList.remove('hidden');
+            } else {
+                if (userPanel) userPanel.classList.add('hidden');
+            }
+        } else {
+            if (userPanel) userPanel.classList.add('hidden');
+        }
+        let html = '';
+        if (pubId) {
+            html += `<button class="back-btn" onclick="loadPosts(null); isViewingSubscriptions = false;">
+                <i class="fas fa-arrow-left"></i>${i18n[currentLang].global_feed}</button>`;
+        }
+        if (!posts || posts.length === 0) {
+            html += `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
+            if (container) container.innerHTML = html;
+            restoreScrollPosition();
+            return;
+        }
+        for (let post of posts) {
+            const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
+            const topComment = comments && comments.length > 0 ? 
+                comments.reduce((prev, current) => (prev.likes_count > current.likes_count) ? prev : current) : null;
+            const commentsCount = comments ? comments.length : 0;
+            const isSubscribed = currentUser ? await checkSubscription(post.public_id) : false;
+            const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
+            const authorDisplay = post.is_user_post ? `<span class="post-author-tag">@${post.author_name}</span>` : '';
+            const postDate = new Date(post.created_at);
+            const formattedDate = postDate.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+            });
+            html += `<div class="post-card" id="post-${post.id}">
+                <h3 class="post-title">${safeTitle}</h3>
+                <div class="post-header">
+                    <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS'}" 
+                         class="post-avatar" alt="${post.publics?.name || 'Channel'}"
+                         onclick="loadPosts(${post.publics?.id})">
+                    <div class="post-meta">
+                        <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
+                            ${post.publics?.name || 'Unknown Channel'} 
+                            ${post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : ''} 
+                            ${authorDisplay}
+                        </div>
+                        <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
+                    </div>
+                    ${currentUser ? `<button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
+                        <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
+                        ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+                    </button>` : ''}
+                </div>
+                <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
+                ${post.image_url ? `<div class="post-image-container">
+                    <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
+                    <div class="image-controls">
+                        <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
+                            <i class="fas fa-expand-alt"></i>
+                        </button>
+                        <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                    </div>
+                </div>` : ''}
+                <div class="post-actions">
+                    <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
+                        <i class="fas fa-heart"></i> ${post.likes_count || 0}
+                    </button>
+                    <button class="action-btn" onclick="toggleComments(${post.id})">
+                        <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
+                    </button>
+                    ${userProfile?.is_admin ? `<button class="action-btn delete-btn" onclick="deletePost(${post.id})">
+                        <i class="fas fa-trash"></i> ${i18n[currentLang].terminate}
+                    </button>` : ''}
+                </div>
+                <div id="comments-${post.id}" class="comments-section hidden">
+                    ${topComment ? `<div class="top-comment">
+                        <i class="fas fa-crown top-comment-icon"></i>
+                        <div class="top-comment-text">
+                            <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
+                        </div>
+                    </div>` : ''}
+                    <div id="comments-list-${post.id}" class="comments-list"></div>
+                    <div class="comment-input">
+                        <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
+                        <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+        if (container) container.innerHTML = html;
+        restoreScrollPosition();
+    } catch (error) {
+        console.error('Load posts error:', error);
+        if (container) container.innerHTML = `<div class="empty-state">Error loading posts</div>`;
+        restoreScrollPosition();
     }
 }
 
@@ -842,14 +992,13 @@ async function handleAuth() {
 // --- ОБНОВЛЕННАЯ ФУНКЦИЯ (ВСТАВИТЬ ВМЕСТО УДАЛЕННОГО) ---
 async function loadPublics() {
     try {
-        // Загружаем ВСЕ каналы (нужно для выпадающего списка админа и фильтрации)
         const { data: publics, error } = await sb.from('publics').select('*').order('name');
         if (error) throw error;
 
         const list = document.getElementById('publics-list');
         const select = document.getElementById('post-public-id');
 
-        // 1. Для админки (выпадающий список при создании поста)
+        // 1. Для админки (выпадающий список при создании поста) - ОСТАВЛЯЕМ ВСЕ КАНАЛЫ
         if (select) {
             select.innerHTML = '<option value="">' + (currentLang === 'ru' ? 'Выберите канал...' : 'Select channel...') + '</option>';
             publics.forEach(pub => {
@@ -857,32 +1006,28 @@ async function loadPublics() {
             });
         }
 
-        // 2. Для боковой панели (МОИ КАНАЛЫ)
+        // 2. Для боковой панели - ПОКАЗЫВАЕМ ТОЛЬКО ПОДПИСКИ
         if (list) {
-            // Если не вошли в систему
-            if (!currentUser || !userProfile) {
+            if (!currentUser) {
                 list.innerHTML = `<div style="padding:15px; font-size:12px; color:var(--text-muted); text-align:center;">
-                    ${currentLang === 'ru' ? 'Войдите для просмотра подписок' : 'Login to see subscriptions'}
+                    ${currentLang === 'ru' ? 'Войдите, чтобы видеть подписки' : 'Login to see your channels'}
                 </div>`;
                 return;
             }
 
-            // Загружаем подписки текущего юзера
-            const { data: subs, error: subError } = await sb.from('user_subscriptions')
+            // Получаем список ID каналов, на которые подписан текущий юзер
+            const { data: subs } = await sb.from('user_subscriptions')
                 .select('public_id')
                 .eq('user_id', userProfile.id);
             
-            if (subError) throw subError;
-
-            // Создаем массив ID подписанных каналов
-            const subIds = (subs || []).map(s => s.public_id);
+            const subIds = subs.map(s => s.public_id);
             
-            // Фильтруем: оставляем только те каналы, на которые есть подписка
+            // Фильтруем общие каналы, оставляя только те, ID которых есть в подписках
             const myPublics = publics.filter(p => subIds.includes(p.id));
 
             if (myPublics.length === 0) {
                 list.innerHTML = `<div style="padding:15px; font-size:12px; color:var(--text-muted); text-align:center;">
-                    ${currentLang === 'ru' ? 'Нет подписок' : 'No subscriptions yet'}
+                    ${currentLang === 'ru' ? 'Вы пока ни на что не подписаны' : 'No subscriptions yet'}
                 </div>`;
             } else {
                 list.innerHTML = myPublics.map(pub => `
@@ -895,9 +1040,7 @@ async function loadPublics() {
                 `).join('');
             }
         }
-    } catch (error) { 
-        console.error('Load publics error:', error); 
-    }
+    } catch (error) { console.error('Load publics error:', error); }
 }
 
 async function createNewPublic() {
@@ -1331,30 +1474,3 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 });
-
-let scrollThrottle = false;
-
-window.onscroll = () => {
-    if (scrollThrottle || isLoadingPosts || !hasMorePosts) return;
-    if (!document.getElementById('profile-modal').classList.contains('hidden')) return;
-
-    // Робимо перевірку: висота вікна + скільки прокрутили
-    const scrollBottom = window.innerHeight + window.pageYOffset;
-    const docHeight = document.documentElement.offsetHeight;
-
-    // Спрацьовує тільки якщо залишилося менше 5 пікселів до самого низу
-    if (scrollBottom >= docHeight - 5) {
-        scrollThrottle = true;
-        
-        console.log("Loading next chunk...");
-        
-        if (isViewingDiscovery) {
-            loadDiscoveryView(true);
-        } else {
-            loadPosts(currentPublicId, true, isViewingSubscriptions);
-        }
-
-        // Тайм-аут, щоб не було повторного спам-виклику протягом секунди
-        setTimeout(() => { scrollThrottle = false; }, 1000);
-    }
-};

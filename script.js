@@ -44,23 +44,12 @@ async function fetchDiscordPosts() {
   }
 }
 
-function stripQuery(url) {
-  try {
-    const u = new URL(url);
-    u.search = "";
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
 function normalizeDiscordPost(dp) {
   return {
     id: dp.id,
     title: dp.title,
     content: dp.content,
-    image_url: dp.image_url ? stripQuery(dp.image_url) : null,
+    image_url: dp.image_url,
     created_at: dp.created_at,
     public_id: dp.public_id,
     likes_count: 0,
@@ -88,13 +77,6 @@ let selectedPubFile = null;
 let selectedUserFile = null;
 let currentLang = localStorage.getItem('lang') || 'en';
 let scrollPosition = 0;
-
-// ===== Infinite scroll state =====
-let FEED_ALL = [];
-let FEED_INDEX = 0;
-const FEED_STEP = 10;
-let FEED_LOCK = false;
-let FEED_OBSERVER = null;
 
 // Профиль
 let currentProfileUser = null;
@@ -364,74 +346,6 @@ async function loadDiscoveryView() {
     } catch (e) { console.error(e); }
 }
 
-function renderPostHTML(post, extras = {}) {
-  // ВАЖНО: это просто оболочка: мы используем твою существующую разметку.
-  // Поэтому внутри мы вызовем твою текущую генерацию карточки через callback.
-  // Ниже будет сделано прямо в loadPosts().
-  return "";
-}
-
-function ensureFeedObserver() {
-  const sentinel = document.getElementById('feed-sentinel');
-  if (!sentinel) return;
-
-  if (FEED_OBSERVER) FEED_OBSERVER.disconnect();
-
-  FEED_OBSERVER = new IntersectionObserver((entries) => {
-    const e = entries[0];
-    if (!e.isIntersecting) return;
-    appendNextBatch();
-  }, { root: null, threshold: 0.1 });
-
-  FEED_OBSERVER.observe(sentinel);
-}
-
-async function appendNextBatch() {
-  if (FEED_LOCK) return;
-  FEED_LOCK = true;
-
-  try {
-    const container = document.getElementById('posts-container');
-    if (!container) return;
-
-    const start = FEED_INDEX;
-    const end = Math.min(FEED_INDEX + FEED_STEP, FEED_ALL.length);
-    if (start >= end) return;
-
-    // Дорисовываем
-    let chunkHTML = '';
-    for (let i = start; i < end; i++) {
-      const post = FEED_ALL[i];
-
-      // --- ВАЖНО ---
-      // тут мы используем ТВОЙ существующий код генерации карточки,
-      // поэтому ниже я покажу, что именно вставить в loadPosts()
-      chunkHTML += await buildOnePostCardHTML(post);
-    }
-
-    // Вставляем перед sentinel
-    const sentinel = document.getElementById('feed-sentinel');
-    if (sentinel) {
-      sentinel.insertAdjacentHTML('beforebegin', chunkHTML);
-    } else {
-      container.insertAdjacentHTML('beforeend', chunkHTML);
-    }
-
-    FEED_INDEX = end;
-
-    // Если всё дорисовали — убираем sentinel и наблюдатель
-    if (FEED_INDEX >= FEED_ALL.length) {
-      const s = document.getElementById('feed-sentinel');
-      if (s) s.remove();
-      if (FEED_OBSERVER) FEED_OBSERVER.disconnect();
-    }
-  } finally {
-    FEED_LOCK = false;
-  }
-}
-
-
-
 // НОВАЯ ФУНКЦИЯ ДЛЯ ФИЛЬТРАЦИИ КАРТОЧЕК
 function filterPublics(query) {
     const searchTerm = query.toLowerCase().trim();
@@ -667,7 +581,7 @@ function normalizeDiscordPost(dp) {
     created_at: dp.created_at,
     title: dp.title,
     content: dp.content,
-    image_url: dp.image_url ? stripQuery(dp.image_url) : null,
+    image_url: dp.image_url,
 
     public_id: dp.public_id,      // важно для фильтрации по каналу
     is_user_post: true,           // чтобы твой UI мог показать author tag
@@ -740,368 +654,131 @@ async function loadPosts(pubId = null) {
     isViewingDiscovery = false;
     isViewingSubscriptions = false;
 
-    document.querySelectorAll('.btn-nav, .btn-discovery, .btn-subscriptions')
-        .forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.btn-nav, .btn-discovery, .btn-subscriptions').forEach(b => b.classList.remove('active'));
     document.getElementById('btn-global').classList.add('active');
 
-    let isLoadingMore = false;
-let userHasScrolled = false;
-
-// фикс: скролл может быть не у window, а у контейнера
-const scrollRoot =
-    document.querySelector('.content') ||
-    document.querySelector('.main') ||
-    document.scrollingElement ||
-    window;
-
-if (scrollRoot === window) {
-    window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
-} else {
-    scrollRoot.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
-}
-
-const observer = new IntersectionObserver(async (entries) => {
-    if (!entries[0].isIntersecting) return;
-
-    // НЕ грузим, если пользователь ещё не скроллил
-    if (!userHasScrolled) return;
-
-    if (isLoadingMore) return;
-    isLoadingMore = true;
-
-    try {
-        await renderNext();
-    } finally {
-        isLoadingMore = false;
-    }
-
-}, {
-    root: scrollRoot === window ? null : scrollRoot,
-    threshold: 0.01,
-    rootMargin: "250px"
-});
-
-observer.observe(sentinel);
-
-// если это window
-if (scrollRoot === window) {
-  window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
-} else {
-  scrollRoot.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
-}
+    const container = document.getElementById('posts-container');
     const userPanel = document.getElementById('user-post-area');
     container.innerHTML = `<div class="loading">LOADING...</div>`;
 
     try {
-        let query = sb.from('posts')
-            .select('*, publics(*)')
-            .order('created_at', { ascending: false });
+  let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
+  if (pubId) query = query.eq('public_id', pubId);
 
-        if (pubId) query = query.eq('public_id', pubId);
+  // грузим и supabase посты, и discord json параллельно
+  const [sbRes, discordRaw] = await Promise.all([
+    query,
+    fetchDiscordPosts()
+  ]);
 
-        const [sbRes, discordRaw] = await Promise.all([
-            query,
-            fetchDiscordPosts()
-        ]);
+  const supaPosts = (sbRes?.data || []).map(p => ({ ...p, _source: 'supabase' }));
+  const discordPosts = (discordRaw || [])
+    .map(normalizeDiscordPost)
+    .filter(p => !pubId || String(p.public_id) === String(pubId));
 
-        const supaPosts = (sbRes?.data || []).map(p => ({ ...p, _source: 'supabase' }));
-        const discordPosts = (discordRaw || [])
-            .map(normalizeDiscordPost)
-            .filter(p => !pubId || String(p.public_id) === String(pubId));
+  // объединяем и сортируем по дате
+  const posts = [...discordPosts, ...supaPosts]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    applyDiscordBrandingToList(posts);
 
-        const posts = [...discordPosts, ...supaPosts]
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  if (pubId && currentUser) userPanel.classList.remove('hidden'); else userPanel.classList.add('hidden');
 
-        applyDiscordBrandingToList(posts);
+  let html = pubId
+    ? `<button class="back-btn" onclick="loadPosts(null)"><i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}</button>`
+    : '';
 
-        if (pubId && currentUser) userPanel.classList.remove('hidden');
-        else userPanel.classList.add('hidden');
-
-        if (!posts.length) {
-            container.innerHTML = `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
-            return;
-        }
-
-        // ===== INFINITE SCROLL STATE =====
-        let visibleCount = 0;
-const STEP = 10;
-
-let isLoadingMore = false;
-let userHasScrolled = false;
-
-// считаем, что скролл был только когда пользователь реально прокрутил
-window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
-
-        container.innerHTML = pubId
-            ? `<button class="back-btn" onclick="loadPosts(null)">
-                 <i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}
-               </button>
-               <div id="feed-list"></div>
-               <div id="feed-sentinel" style="height:1px;"></div>`
-            : `<div id="feed-list"></div>
-               <div id="feed-sentinel" style="height:1px;"></div>`;
-
-        const feedList = document.getElementById('feed-list');
-        const sentinel = document.getElementById('feed-sentinel');
-
-        async function renderNextBatch() {
-            const slice = posts.slice(visibleCount, visibleCount + STEP);
-            for (let post of slice) {
-                const isDiscord = post._source === 'discord';
-                const isSub = currentUser
-                    ? await checkSubscription(post.public_id)
-                    : false;
-
-                const safeTitle = escapeHTML((post.title || 'NO SUBJECT')).toUpperCase();
-                const safeContent = escapeHTML(post.content || '').replace(/\n/g, '<br>');
-
-                feedList.insertAdjacentHTML('beforeend', `
-                <div class="post-card">
-                    <h3 class="post-title">
-                        ${safeTitle}
-                        ${isDiscord ? `<span class="post-author-tag" style="margin-left:10px">DISCORD</span>` : ''}
-                    </h3>
-
-                    <div class="post-header">
-                        <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48'}"
-                             class="post-avatar" onclick="loadPosts(${post.public_id})">
-
-                        <div class="post-meta">
-                            <div class="post-channel" onclick="loadPosts(${post.public_id})">
-                                ${escapeHTML(post.publics?.name || 'Unknown')}
-                                ${post.is_user_post ? `<span class="post-author-tag">@${escapeHTML(post.author_name || '')}</span>` : ''}
-                            </div>
-                            <div class="post-date">${new Date(post.created_at).toLocaleString()}</div>
-                        </div>
-
-                        ${currentUser ? `
-                            <button class="subscribe-btn ${isSub ? 'subscribed':''}"
-                                    onclick="toggleSubscription(${post.public_id})">
-                                ${isSub ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
-                            </button>` : ''}
-                    </div>
-
-                    <div class="post-content">${safeContent}</div>
-
-                    ${post.image_url ? `<div class="post-image-container">
-  <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
-  <div class="image-controls">
-    <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
-      <i class="fas fa-expand-alt"></i>
-    </button>
-    <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
-      <i class="fas fa-external-link-alt"></i>
-    </button>
-  </div>
-</div>` : ''}
-
-                    <div class="post-actions">
-                        ${
-                            isDiscord
-                                ? `<button class="action-btn"
-                                       onclick="toggleDiscordComments('${cssSafeId(post.id)}')">
-                                       <i class="fas fa-comments"></i>
-                                       ${i18n[currentLang].responses}
-                                       (${post._discord_comments.length})
-                                   </button>`
-                                : `
-                                   <button class="action-btn"
-                                           onclick="likePost(${post.id}, ${post.likes_count})">
-                                       <i class="fas fa-heart"></i> ${post.likes_count}
-                                   </button>
-                                   <button class="action-btn"
-                                           onclick="toggleComments(${post.id})">
-                                       <i class="fas fa-comments"></i>
-                                       ${i18n[currentLang].responses}
-                                   </button>`
-                        }
-                    </div>
-
-                    ${
-                        isDiscord
-                            ? `<div id="discord-comments-${cssSafeId(post.id)}"
-                                   class="comments-section hidden">
-                                   <div id="discord-comments-list-${cssSafeId(post.id)}"></div>
-                               </div>`
-                            : `<div id="comments-${post.id}" class="comments-section hidden">
-  <div id="comments-list-${post.id}" class="comments-list"></div>
-  <div class="comment-input">
-    <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
-    <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
-  </div>
-</div>`
-                    }
-                </div>
-                `);
-
-                if (isDiscord) {
-                    renderDiscordComments(cssSafeId(post.id), post._discord_comments);
-                }
-            }
-
-            visibleCount += slice.length;
-
-            if (visibleCount >= posts.length) {
-                observer.disconnect();
-                sentinel.remove();
-            }
-        }
-
-        const observer = new IntersectionObserver(async (entries) => {
-    if (!entries[0].isIntersecting) return;
-
-    // ключевой момент: не догружаем само при первом рендере
-    if (!userHasScrolled) return;
-
-    if (isLoadingMore) return;
-    isLoadingMore = true;
-    try {
-        await renderNextBatch();
-    } finally {
-        isLoadingMore = false;
-    }
-}, {
-    root: null,
-    threshold: 0.01,
-    rootMargin: "200px" // начнёт грузить чуть заранее, но только после скролла
-});
-
-        observer.observe(sentinel);
-
-        // первая загрузка
-        await renderNextBatch();
-
-        restoreScrollPosition();
-
-    } catch (e) {
-        console.error(e);
-        container.innerHTML = `<div class="empty-state">Error loading posts</div>`;
-    }
-}
-
-async function buildOnePostCardHTML(post) {
-  // --- это буквально твой код из цикла for (let post of posts) ---
-  // Я даю версию, совместимую с твоей текущей логикой Supabase-комментов.
-
-  // Discord постам не лезем в Supabase comments
-  let comments = [];
-  let topComment = null;
-
-  if (!post._is_discord) {
-    const res = await sb.from('comments').select('*').eq('post_id', post.id);
-    comments = res.data || [];
-    topComment = comments.length > 0
-      ? comments.reduce((prev, cur) => (prev.likes_count > cur.likes_count) ? prev : cur)
-      : null;
+  if (!posts || posts.length === 0) {
+    html += `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
   } else {
-    comments = post._discord_comments || [];
-    topComment = null; // можно позже сделать "топ" по лайкам, но в Discord их нет
-  }
+    for (let post of posts) {
+      const isDiscord = post._source === 'discord';
+      const isSub = (!isDiscord && currentUser) ? await checkSubscription(post.public_id) : (currentUser ? await checkSubscription(post.public_id) : false);
 
-  const commentsCount = comments ? comments.length : 0;
-  const isSubscribed = currentUser && !post._is_discord ? await checkSubscription(post.public_id) : false;
+      // чуть безопаснее контент (у тебя сейчас вставляется как есть)
+      const safeTitle = escapeHTML((post.title || 'NO SUBJECT')).toUpperCase();
+      const safeContent = escapeHTML(post.content || '').replace(/\n/g, '<br>');
 
-  const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
-  const authorDisplay = post.is_user_post ? `<span class="post-author-tag">@${post.author_name}</span>` : '';
+      html += `
+      <div class="post-card">
+        <h3 class="post-title">
+          ${safeTitle}
+          ${isDiscord ? `<span class="post-author-tag" style="margin-left:10px">DISCORD</span>` : ''}
+        </h3>
 
-  const postDate = new Date(post.created_at);
-  const formattedDate = postDate.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-  });
+        <div class="post-header">
+          <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48'}"
+               class="post-avatar" onclick="loadPosts(${post.public_id})">
 
-  const avatar = post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS';
-  const channelName = post.publics?.name || 'Unknown Channel';
-  const verified = post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : '';
-
-  return `
-    <div class="post-card" id="post-${post.id}">
-      <h3 class="post-title">${safeTitle}</h3>
-      <div class="post-header">
-        <img src="${avatar}" class="post-avatar" alt="${channelName}"
-             onclick="loadPosts(${post.publics?.id})">
-        <div class="post-meta">
-          <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
-            ${channelName} ${verified} ${authorDisplay}
+          <div class="post-meta">
+            <div class="post-channel" onclick="loadPosts(${post.public_id})">
+              ${escapeHTML(post.publics?.name || 'Unknown')}
+              ${post.is_user_post ? `<span class="post-author-tag">@${escapeHTML(post.author_name || '')}</span>` : ''}
+            </div>
+            <div class="post-date">${new Date(post.created_at).toLocaleString()}</div>
           </div>
-          <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
+
+          ${currentUser ? `
+            <button class="subscribe-btn ${isSub ? 'subscribed':''}" onclick="toggleSubscription(${post.public_id})">
+              ${isSub ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+            </button>` : ''
+          }
+        </div>
+
+        <div class="post-content">${safeContent}</div>
+
+        ${post.image_url ? `<img src="${post.image_url}" class="post-image" onclick="window.open(this.src)">` : ''}
+
+        <div class="post-actions">
+          ${
+            isDiscord
+              ? `<button class="action-btn" onclick="toggleDiscordComments('${escapeHTML(post.id)}')">
+                   <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${post._discord_comments.length})
+                 </button>`
+              : `
+                <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})"><i class="fas fa-heart"></i> ${post.likes_count}</button>
+                <button class="action-btn" onclick="toggleComments(${post.id})"><i class="fas fa-comments"></i> ${i18n[currentLang].responses}</button>
+              `
+          }
         </div>
 
         ${
-          currentUser && !post._is_discord
-            ? `<button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
-                <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
-                ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
-              </button>`
-            : (post._is_discord ? `<span class="subscribe-btn subscribed" style="pointer-events:none;opacity:.75;">
-                <i class="fab fa-discord"></i> DISCORD
-              </span>` : '')
+          isDiscord
+            ? `
+              <div id="discord-comments-${cssSafeId(post.id)}" class="comments-section hidden">
+                <div id="discord-comments-list-${cssSafeId(post.id)}"></div>
+              </div>
+            `
+            : `
+              <div id="comments-${post.id}" class="comments-section hidden">
+                <div id="comments-list-${post.id}"></div>
+                <div class="comment-input">
+                  <input type="text" id="comment-input-${post.id}" placeholder="...">
+                  <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                </div>
+              </div>
+            `
         }
       </div>
+      `;
 
-      <div class="post-content">${(post.content || '').replace(/\n/g, '<br>')}</div>
+      // после вставки блока — если это discord, сразу рендерим комменты в контейнер
+      // (тут просто накапливаем, реально вызовем после container.innerHTML)
+    }
+  }
 
-      ${
-        post.image_url ? `<div class="post-image-container">
-          <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
-          <div class="image-controls">
-            <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
-              <i class="fas fa-expand-alt"></i>
-            </button>
-            <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
-              <i class="fas fa-external-link-alt"></i>
-            </button>
-          </div>
-        </div>` : ''
-      }
+  container.innerHTML = html;
 
-      <div class="post-actions">
-        ${
-          !post._is_discord
-            ? `<button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
-                <i class="fas fa-heart"></i> ${post.likes_count || 0}
-              </button>`
-            : `<button class="action-btn" disabled style="opacity:.6;cursor:not-allowed;">
-                <i class="fas fa-heart"></i> —
-              </button>`
-        }
+  // Теперь когда DOM готов — отрисуем discord комменты
+  for (let post of posts) {
+    if (post._source === 'discord') {
+      renderDiscordComments(post.id, post._discord_comments);
+    }
+  }
 
-        <button class="action-btn" onclick="toggleComments('${post.id}')">
-          <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
-        </button>
-
-        ${
-          userProfile?.is_admin && !post._is_discord
-            ? `<button class="action-btn delete-btn" onclick="deletePost(${post.id})">
-                <i class="fas fa-trash"></i> ${i18n[currentLang].terminate}
-              </button>`
-            : ''
-        }
-      </div>
-
-      <div id="comments-${post.id}" class="comments-section hidden">
-        ${
-          topComment ? `<div class="top-comment">
-            <i class="fas fa-crown top-comment-icon"></i>
-            <div class="top-comment-text">
-              <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
-            </div>
-          </div>` : ''
-        }
-        <div id="comments-list-${post.id}" class="comments-list"></div>
-        ${
-          post._is_discord
-            ? `<div class="comment-input" style="opacity:.65;">
-                <input type="text" disabled placeholder="Discord comments read-only">
-                <button disabled>${i18n[currentLang].send}</button>
-              </div>`
-            : `<div class="comment-input">
-                <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
-                <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
-              </div>`
-        }
-      </div>
-    </div>
-  `;
+  restoreScrollPosition();
+} catch (e) {
+  console.error(e);
+}
 }
 
 // Посты
@@ -1224,7 +901,6 @@ async function loadSubscriptionsFeed() {
             container.innerHTML = html;
             return;
         }
-        console.log("BLOCK A");
         for (let post of posts) {
             const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
             const topComment = comments && comments.length > 0 ? 
@@ -1327,7 +1003,7 @@ const discordPosts = (discordRaw || [])
         id: dp.id,
         title: dp.title,
         content: dp.content,
-        image_url: dp.image_url ? stripQuery(dp.image_url) : null,
+        image_url: dp.image_url,
         created_at: dp.created_at,
         public_id: dp.public_id,
         likes_count: 0,
@@ -1370,73 +1046,77 @@ const posts = [
             restoreScrollPosition();
             return;
         }
-        console.log("BLOCK B");
-       container.innerHTML = `
-  ${pubId ? `<button class="back-btn" onclick="loadPosts(null); isViewingSubscriptions = false;">
-    <i class="fas fa-arrow-left"></i>${i18n[currentLang].global_feed}
-  </button>` : ''}
-  <div id="feed-list"></div>
-  <div id="feed-sentinel" style="height:1px;"></div>
-`;
-
-const feedList = document.getElementById('feed-list');
-const sentinel = document.getElementById('feed-sentinel');
-
-let visibleCount = 0;
-const STEP = 10;
-let isLoading = false;
-
-async function renderNext() {
-  if (isLoading) return;
-  isLoading = true;
-
-  const slice = posts.slice(visibleCount, visibleCount + STEP);
-  if (!slice.length) {
-    observer.disconnect();
-    sentinel.remove();
-    return;
-  }
-
-  for (let post of slice) {
-
-    const { data: comments } = await sb.from('comments')
-      .select('*').eq('post_id', post.id);
-
-    const commentsCount = comments ? comments.length : 0;
-
-    const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
-
-    feedList.insertAdjacentHTML('beforeend', `
-      <div class="post-card">
-        <h3 class="post-title">${safeTitle}</h3>
-        <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
-        <div class="post-actions">
-          <button class="action-btn" onclick="toggleComments(${post.id})">
-            <i class="fas fa-comments"></i>
-            ${i18n[currentLang].responses} (${commentsCount})
-          </button>
-        </div>
-      </div>
-    `);
-  }
-
-  visibleCount += slice.length;
-  isLoading = false;
-}
-
-const observer = new IntersectionObserver(entries => {
-  if (entries[0].isIntersecting) {
-    renderNext();
-  }
-}, { rootMargin: "300px" });
-
-observer.observe(sentinel);
-
-// первая порция
-await renderNext();
-
-restoreScrollPosition();
-    
+        for (let post of posts) {
+            const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
+            const topComment = comments && comments.length > 0 ? 
+                comments.reduce((prev, current) => (prev.likes_count > current.likes_count) ? prev : current) : null;
+            const commentsCount = comments ? comments.length : 0;
+            const isSubscribed = currentUser ? await checkSubscription(post.public_id) : false;
+            const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
+            const authorDisplay = post.is_user_post ? `<span class="post-author-tag">@${post.author_name}</span>` : '';
+            const postDate = new Date(post.created_at);
+            const formattedDate = postDate.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+            });
+            html += `<div class="post-card" id="post-${post.id}">
+                <h3 class="post-title">${safeTitle}</h3>
+                <div class="post-header">
+                    <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS'}" 
+                         class="post-avatar" alt="${post.publics?.name || 'Channel'}"
+                         onclick="loadPosts(${post.publics?.id})">
+                    <div class="post-meta">
+                        <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
+                            ${post.publics?.name || 'Unknown Channel'} 
+                            ${post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : ''} 
+                            ${authorDisplay}
+                        </div>
+                        <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
+                    </div>
+                    ${currentUser ? `<button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
+                        <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
+                        ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+                    </button>` : ''}
+                </div>
+                <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
+                ${post.image_url ? `<div class="post-image-container">
+                    <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
+                    <div class="image-controls">
+                        <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
+                            <i class="fas fa-expand-alt"></i>
+                        </button>
+                        <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                    </div>
+                </div>` : ''}
+                <div class="post-actions">
+                    <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
+                        <i class="fas fa-heart"></i> ${post.likes_count || 0}
+                    </button>
+                    <button class="action-btn" onclick="toggleComments(${post.id})">
+                        <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
+                    </button>
+                    ${userProfile?.is_admin ? `<button class="action-btn delete-btn" onclick="deletePost(${post.id})">
+                        <i class="fas fa-trash"></i> ${i18n[currentLang].terminate}
+                    </button>` : ''}
+                </div>
+                <div id="comments-${post.id}" class="comments-section hidden">
+                    ${topComment ? `<div class="top-comment">
+                        <i class="fas fa-crown top-comment-icon"></i>
+                        <div class="top-comment-text">
+                            <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
+                        </div>
+                    </div>` : ''}
+                    <div id="comments-list-${post.id}" class="comments-list"></div>
+                    <div class="comment-input">
+                        <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
+                        <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+        if (container) container.innerHTML = html;
+        restoreScrollPosition();
     } catch (error) {
         console.error('Load posts error:', error);
         if (container) container.innerHTML = `<div class="empty-state">Error loading posts</div>`;
@@ -1754,9 +1434,6 @@ async function loadUserProfile(username) {
 }
 
 async function loadProfileStats(userId) {
-setTextSafe('profile-rating-score', currentProfileUser?.total_rating || 0);
-setTextSafe('profile-subscriptions-count', subscriptionsCount || 0);
-setTextSafe('profile-posts-count', postsCount || 0);
     try {
         const { count: postsCount } = await sb.from('posts')
             .select('*', { count: 'exact', head: true })
@@ -1773,10 +1450,8 @@ setTextSafe('profile-posts-count', postsCount || 0);
         const { count: subscriptionsCount } = await sb.from('user_subscriptions')
             .select('*', { count: 'exact', head: true })
             .eq('public_id', userId);
-        const elSubs = document.getElementById('profile-subscriptions-count');
-        if (elSubs) elSubs.textContent = subscriptionsCount || 0;
-        document.getElementById('profile-rating-score').textContent =
-    currentProfileUser.total_rating || 0;
+        document.getElementById('profile-subscriptions-count').textContent = subscriptionsCount || 0;
+        document.getElementById('profile-rating-score').textContent = currentProfileUser.total_rating || 0;
     } catch (error) { console.error('Error loading profile stats:', error); }
 }
 
@@ -1992,11 +1667,6 @@ async function rateUser(direction) {
         restoreScrollPosition();
     }
 }
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
-}
-
 
 function updateRatingButtons() {
     const upBtn = document.querySelector('.rating-up');

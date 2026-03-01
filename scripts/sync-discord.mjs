@@ -10,7 +10,7 @@ const API = "https://discord.com/api/v10";
 
 // ====== CONFIG ======
 const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
-const PUBLIC_NAME = "DISCORD";
+const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
 const PUBLIC_AVATAR_URL = "https://cdn-icons-png.flaticon.com/512/2111/2111370.png";
 
 const THREADS_PAGE_LIMIT = 500;

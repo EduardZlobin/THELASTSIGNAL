@@ -1743,6 +1743,9 @@ async function loadUserProfile(username) {
 }
 
 async function loadProfileStats(userId) {
+setTextSafe('profile-rating-score', currentProfileUser?.total_rating || 0);
+setTextSafe('profile-subscriptions-count', subscriptionsCount || 0);
+setTextSafe('profile-posts-count', postsCount || 0);
     try {
         const { count: postsCount } = await sb.from('posts')
             .select('*', { count: 'exact', head: true })
@@ -1759,8 +1762,10 @@ async function loadProfileStats(userId) {
         const { count: subscriptionsCount } = await sb.from('user_subscriptions')
             .select('*', { count: 'exact', head: true })
             .eq('public_id', userId);
-        document.getElementById('profile-subscriptions-count').textContent = subscriptionsCount || 0;
-        document.getElementById('profile-rating-score').textContent = currentProfileUser.total_rating || 0;
+        const elSubs = document.getElementById('profile-subscriptions-count');
+        if (elSubs) elSubs.textContent = subscriptionsCount || 0;
+        document.getElementById('profile-rating-score').textContent =
+    currentProfileUser.total_rating || 0;
     } catch (error) { console.error('Error loading profile stats:', error); }
 }
 
@@ -1976,6 +1981,11 @@ async function rateUser(direction) {
         restoreScrollPosition();
     }
 }
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 
 function updateRatingButtons() {
     const upBtn = document.querySelector('.rating-up');

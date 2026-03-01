@@ -91,7 +91,7 @@ async function fetchForumPosts(forumId) {
     posts.push({
       id: `discord:${thread.id}`,
       source: "discord",
-      public_id: 123, // <-- ВПИШИ СЮДА ID паблика из Supabase (ты уже выбрал)
+      public_id: 9, // <-- ВПИШИ СЮДА ID паблика из Supabase (ты уже выбрал)
       public_name: "DISCORD",
       public_avatar_url: "https://cdn-icons-png.flaticon.com/512/2111/2111370.png",
       title: thread.name,

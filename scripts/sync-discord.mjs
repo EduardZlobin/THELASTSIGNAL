@@ -1,10 +1,10 @@
 import fs from "fs/promises";
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const FORUM_ID = process.env.DISCORD_CHANNEL_ID;
 
 if (!TOKEN) throw new Error("DISCORD_TOKEN missing");
-if (!CHANNEL_ID) throw new Error("DISCORD_CHANNEL_ID missing");
+if (!FORUM_ID) throw new Error("DISCORD_CHANNEL_ID missing");
 
 const API = "https://discord.com/api/v10";
 
@@ -13,8 +13,10 @@ const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "DISCORD";
 const PUBLIC_AVATAR_URL = "https://cdn-icons-png.flaticon.com/512/2111/2111370.png";
 
-const POSTS_LIMIT = 50;      // сколько постов форума тянуть
-const COMMENTS_LIMIT = 100;  // сколько комментов на пост
+const THREADS_PAGE_LIMIT = 50;
+const MESSAGES_LIMIT = 100;
+// сколько страниц архивных тредов пробовать (на всякий)
+const ARCHIVE_PAGES = 5;
 
 async function discordFetch(endpoint) {
   const url = `${API}${endpoint}`;
@@ -24,6 +26,7 @@ async function discordFetch(endpoint) {
 
   const text = await res.text();
   if (!res.ok) {
+    // Discord любит маскировать отсутствие доступа под 404
     throw new Error(`Discord API error ${res.status} on ${endpoint}: ${text}`);
   }
   return text ? JSON.parse(text) : null;
@@ -47,99 +50,113 @@ function normalizeComment(m) {
   };
 }
 
-// ====== FORUM: posts are messages in the forum channel ======
-async function fetchForumPostsViaMessages(forumId) {
-  // В форумах "посты" приходят как messages самого канала форума
-  const forumMessages = await discordFetch(`/channels/${forumId}/messages?limit=${POSTS_LIMIT}`);
-  const posts = [];
-
-  for (const msg of forumMessages || []) {
-    // Для форумов: msg.id == thread/channel id, где лежат комменты.
-    // Но бывают случаи, когда thread ещё не доступен — тогда просто без комментов.
-    const threadId = msg.id;
-
-    let comments = [];
-    try {
-      const threadMessages = await discordFetch(`/channels/${threadId}/messages?limit=${COMMENTS_LIMIT}`);
-      // Внутри треда обычно есть тот же стартовый пост (или нет).
-      // Мы считаем "комментами" всё кроме самого msg.id
-      comments = (threadMessages || [])
-        .filter(m => m.id !== msg.id)
-        .map(normalizeComment);
-    } catch (e) {
-      // Если комменты не достали — не валим весь sync
-      console.warn("Comments fetch failed for post", msg.id, e.message);
-      comments = [];
-    }
-
-    // Заголовок в forum post часто лежит в msg.embeds[0].title,
-    // но не всегда. Иногда Discord отдаёт "content" пустой, а title в embed.
-    const embedTitle =
-      msg?.embeds?.find(e => typeof e?.title === "string" && e.title.trim())?.title || null;
-
-    const title =
-      embedTitle ||
-      (msg.content ? msg.content.slice(0, 80) : `POST ${msg.id}`);
-
-    posts.push({
-      id: `discord:${msg.id}`,
-      source: "discord",
-
-      public_id: PUBLIC_ID,
-      public_name: PUBLIC_NAME,
-      public_avatar_url: PUBLIC_AVATAR_URL,
-
-      title,
-      content: msg.content || "",
-      image_url: pickImageFromMessage(msg),
-
-      created_at: msg.timestamp,
-      author_name: msg.author?.username || "user",
-
-      comments
-    });
+async function safeFetch(endpoint, label) {
+  try {
+    return await discordFetch(endpoint);
+  } catch (e) {
+    console.warn(`[skip] ${label}: ${e.message}`);
+    return null;
   }
-
-  return posts;
 }
 
-// ====== TEXT CHANNEL fallback (if needed) ======
-async function fetchTextChannelPosts(channelId) {
-  const msgs = await discordFetch(`/channels/${channelId}/messages?limit=${POSTS_LIMIT}`);
-  return (msgs || []).map(m => ({
-    id: `discord:${m.id}`,
+async function fetchActiveThreadsFromGuild(guildId, forumId) {
+  // Guild-level endpoint: чаще доступен, даже когда channel threads endpoints чудят
+  const data = await discordFetch(`/guilds/${guildId}/threads/active`);
+  const threads = data?.threads || [];
+  // parent_id у тредов = id форума (для forum posts)
+  const forumThreads = threads.filter(t => String(t.parent_id) === String(forumId));
+  return forumThreads;
+}
+
+async function fetchArchivedThreadsFromForum(forumId) {
+  // Может падать 404/403 — тогда вернём []
+  const all = [];
+  let before = null;
+
+  for (let i = 0; i < ARCHIVE_PAGES; i++) {
+    const endpoint = before
+      ? `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}&before=${encodeURIComponent(before)}`
+      : `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}`;
+
+    const arch = await safeFetch(endpoint, "archived threads");
+    if (!arch) break;
+
+    const chunk = arch?.threads || [];
+    all.push(...chunk);
+
+    if (!arch?.has_more || chunk.length === 0) break;
+    before = chunk[chunk.length - 1].archive_timestamp;
+  }
+
+  return all;
+}
+
+async function fetchThreadAsPost(thread, forumId) {
+  const threadId = thread.id;
+
+  // тянем сообщения треда
+  const msgs = await safeFetch(`/channels/${threadId}/messages?limit=${MESSAGES_LIMIT}`, `thread messages ${threadId}`);
+  if (!msgs || msgs.length === 0) return null;
+
+  // starter — самое старое сообщение (обычно последний элемент массива)
+  const starter = msgs[msgs.length - 1];
+  const comments = msgs
+    .filter(m => m.id !== starter.id)
+    .map(normalizeComment);
+
+  return {
+    id: `discord:${threadId}`,
     source: "discord",
 
     public_id: PUBLIC_ID,
     public_name: PUBLIC_NAME,
     public_avatar_url: PUBLIC_AVATAR_URL,
 
-    title: (m.content || "DISCORD MESSAGE").slice(0, 60),
-    content: m.content || "",
-    image_url: pickImageFromMessage(m),
+    // для форума лучше брать имя треда как заголовок
+    title: thread.name || (starter.content ? starter.content.slice(0, 80) : `POST ${threadId}`),
+    content: starter.content || "",
+    image_url: pickImageFromMessage(starter),
 
-    created_at: m.timestamp,
-    author_name: m.author?.username || "user",
+    created_at: starter.timestamp,
+    author_name: starter.author?.username || "user",
 
-    comments: []
-  }));
+    comments
+  };
 }
 
 async function main() {
   console.log("Fetching Discord posts...");
 
-  const ch = await discordFetch(`/channels/${CHANNEL_ID}`);
+  // 1) Считываем канал форума
+  const ch = await discordFetch(`/channels/${FORUM_ID}`);
   console.log("Channel type:", ch?.type, "name:", ch?.name);
 
-  let posts = [];
+  if (ch?.type !== 15 && ch?.type !== 16) {
+    throw new Error(`DISCORD_CHANNEL_ID is not a forum/media channel. type=${ch?.type}`);
+  }
 
-  // 15 = forum, 16 = media (обычно тоже как форум по messages)
-  if (ch?.type === 15 || ch?.type === 16) {
-    posts = await fetchForumPostsViaMessages(CHANNEL_ID);
-  } else if (ch?.type === 0 || ch?.type === 5) {
-    posts = await fetchTextChannelPosts(CHANNEL_ID);
-  } else {
-    throw new Error(`Unsupported channel type: ${ch?.type}`);
+  const guildId = ch?.guild_id;
+  if (!guildId) throw new Error("No guild_id on channel (is it a DM? weird for forum)");
+
+  // 2) Активные треды через guild endpoint
+  const activeForumThreads = await fetchActiveThreadsFromGuild(guildId, FORUM_ID);
+  console.log("Active forum threads (guild-level) =", activeForumThreads.length);
+
+  // 3) Архивные треды форума (если доступно)
+  const archivedForumThreads = await fetchArchivedThreadsFromForum(FORUM_ID);
+  console.log("Archived forum threads =", archivedForumThreads.length);
+
+  // 4) Объединяем и делаем unique по id
+  const uniq = new Map();
+  for (const t of [...activeForumThreads, ...archivedForumThreads]) uniq.set(t.id, t);
+  const threads = [...uniq.values()];
+  console.log("Total unique threads to process =", threads.length);
+
+  // 5) Тянем посты
+  const posts = [];
+  for (const thread of threads) {
+    const post = await fetchThreadAsPost(thread, FORUM_ID);
+    if (post) posts.push(post);
   }
 
   posts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));

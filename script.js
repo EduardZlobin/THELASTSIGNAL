@@ -1309,77 +1309,72 @@ const posts = [
             return;
         }
         console.log("BLOCK B");
-        for (let post of posts) {
-            const { data: comments } = await sb.from('comments').select('*').eq('post_id', post.id);
-            const topComment = comments && comments.length > 0 ? 
-                comments.reduce((prev, current) => (prev.likes_count > current.likes_count) ? prev : current) : null;
-            const commentsCount = comments ? comments.length : 0;
-            const isSubscribed = currentUser ? await checkSubscription(post.public_id) : false;
-            const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
-            const authorDisplay = post.is_user_post ? `<span class="post-author-tag">@${post.author_name}</span>` : '';
-            const postDate = new Date(post.created_at);
-            const formattedDate = postDate.toLocaleDateString(currentLang === 'ru' ? 'ru-RU' : 'en-US', {
-                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-            });
-            html += `<div class="post-card" id="post-${post.id}">
-                <h3 class="post-title">${safeTitle}</h3>
-                <div class="post-header">
-                    <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48/0b1324/7896ff?text=LS'}" 
-                         class="post-avatar" alt="${post.publics?.name || 'Channel'}"
-                         onclick="loadPosts(${post.publics?.id})">
-                    <div class="post-meta">
-                        <div class="post-channel" onclick="loadPosts(${post.publics?.id})">
-                            ${post.publics?.name || 'Unknown Channel'} 
-                            ${post.publics?.is_verified ? '<i class="fas fa-check-circle" style="color:var(--success)"></i>' : ''} 
-                            ${authorDisplay}
-                        </div>
-                        <div class="post-date"><i class="far fa-clock"></i> ${formattedDate}</div>
-                    </div>
-                    ${currentUser ? `<button class="subscribe-btn ${isSubscribed ? 'subscribed' : ''}" onclick="toggleSubscription(${post.public_id})">
-                        <i class="fas ${isSubscribed ? 'fa-bell-slash' : 'fa-bell'}"></i>
-                        ${isSubscribed ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
-                    </button>` : ''}
-                </div>
-                <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
-                ${post.image_url ? `<div class="post-image-container">
-                    <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
-                    <div class="image-controls">
-                        <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
-                            <i class="fas fa-expand-alt"></i>
-                        </button>
-                        <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>` : ''}
-                <div class="post-actions">
-                    <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})">
-                        <i class="fas fa-heart"></i> ${post.likes_count || 0}
-                    </button>
-                    <button class="action-btn" onclick="toggleComments(${post.id})">
-                        <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${commentsCount})
-                    </button>
-                    ${userProfile?.is_admin ? `<button class="action-btn delete-btn" onclick="deletePost(${post.id})">
-                        <i class="fas fa-trash"></i> ${i18n[currentLang].terminate}
-                    </button>` : ''}
-                </div>
-                <div id="comments-${post.id}" class="comments-section hidden">
-                    ${topComment ? `<div class="top-comment">
-                        <i class="fas fa-crown top-comment-icon"></i>
-                        <div class="top-comment-text">
-                            <span class="top-comment-author" onclick="openProfile('${topComment.author_name}')">@${topComment.author_name}</span>: ${topComment.text}
-                        </div>
-                    </div>` : ''}
-                    <div id="comments-list-${post.id}" class="comments-list"></div>
-                    <div class="comment-input">
-                        <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
-                        <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
-                    </div>
-                </div>
-            </div>`;
-        }
-        if (container) container.innerHTML = html;
-        restoreScrollPosition();
+       container.innerHTML = `
+  ${pubId ? `<button class="back-btn" onclick="loadPosts(null); isViewingSubscriptions = false;">
+    <i class="fas fa-arrow-left"></i>${i18n[currentLang].global_feed}
+  </button>` : ''}
+  <div id="feed-list"></div>
+  <div id="feed-sentinel" style="height:1px;"></div>
+`;
+
+const feedList = document.getElementById('feed-list');
+const sentinel = document.getElementById('feed-sentinel');
+
+let visibleCount = 0;
+const STEP = 10;
+let isLoading = false;
+
+async function renderNext() {
+  if (isLoading) return;
+  isLoading = true;
+
+  const slice = posts.slice(visibleCount, visibleCount + STEP);
+  if (!slice.length) {
+    observer.disconnect();
+    sentinel.remove();
+    return;
+  }
+
+  for (let post of slice) {
+
+    const { data: comments } = await sb.from('comments')
+      .select('*').eq('post_id', post.id);
+
+    const commentsCount = comments ? comments.length : 0;
+
+    const safeTitle = (post.title || i18n[currentLang].no_subject).toUpperCase();
+
+    feedList.insertAdjacentHTML('beforeend', `
+      <div class="post-card">
+        <h3 class="post-title">${safeTitle}</h3>
+        <div class="post-content">${post.content.replace(/\n/g, '<br>')}</div>
+        <div class="post-actions">
+          <button class="action-btn" onclick="toggleComments(${post.id})">
+            <i class="fas fa-comments"></i>
+            ${i18n[currentLang].responses} (${commentsCount})
+          </button>
+        </div>
+      </div>
+    `);
+  }
+
+  visibleCount += slice.length;
+  isLoading = false;
+}
+
+const observer = new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting) {
+    renderNext();
+  }
+}, { rootMargin: "300px" });
+
+observer.observe(sentinel);
+
+// первая порция
+await renderNext();
+
+restoreScrollPosition();
+    
     } catch (error) {
         console.error('Load posts error:', error);
         if (container) container.innerHTML = `<div class="empty-state">Error loading posts</div>`;

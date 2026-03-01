@@ -733,7 +733,51 @@ async function loadPosts(pubId = null) {
         .forEach(b => b.classList.remove('active'));
     document.getElementById('btn-global').classList.add('active');
 
-    const container = document.getElementById('posts-container');
+    let isLoadingMore = false;
+let userHasScrolled = false;
+
+// фикс: скролл может быть не у window, а у контейнера
+const scrollRoot =
+    document.querySelector('.content') ||
+    document.querySelector('.main') ||
+    document.scrollingElement ||
+    window;
+
+if (scrollRoot === window) {
+    window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
+} else {
+    scrollRoot.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
+}
+
+const observer = new IntersectionObserver(async (entries) => {
+    if (!entries[0].isIntersecting) return;
+
+    // НЕ грузим, если пользователь ещё не скроллил
+    if (!userHasScrolled) return;
+
+    if (isLoadingMore) return;
+    isLoadingMore = true;
+
+    try {
+        await renderNext();
+    } finally {
+        isLoadingMore = false;
+    }
+
+}, {
+    root: scrollRoot === window ? null : scrollRoot,
+    threshold: 0.01,
+    rootMargin: "250px"
+});
+
+observer.observe(sentinel);
+
+// если это window
+if (scrollRoot === window) {
+  window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
+} else {
+  scrollRoot.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
+}
     const userPanel = document.getElementById('user-post-area');
     container.innerHTML = `<div class="loading">LOADING...</div>`;
 

@@ -485,6 +485,104 @@ async function uploadToStorage(file, bucket) {
     return sb.storage.from(bucket).getPublicUrl(name).data.publicUrl;
 }
 
+// --- DISCORD FEED (JSON, который обновляет GitHub Actions) ---
+const DISCORD_FEED_URL = './discord_posts.json';
+
+// мягкий кеш на 30 секунд, чтобы не долбить fetch при каждом клике
+let _discordCache = { ts: 0, data: [] };
+
+async function fetchDiscordPosts() {
+  const now = Date.now();
+  if (now - _discordCache.ts < 30_000) return _discordCache.data;
+
+  try {
+    // cache-buster чтобы GitHub Pages не отдавал старьё
+    const res = await fetch(`${DISCORD_FEED_URL}?v=${now}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`discord feed http ${res.status}`);
+    const data = await res.json();
+    _discordCache = { ts: now, data: Array.isArray(data) ? data : [] };
+    return _discordCache.data;
+  } catch (e) {
+    console.warn('Discord feed unavailable:', e);
+    _discordCache = { ts: now, data: [] };
+    return [];
+  }
+}
+
+// Унификация: делаем Discord пост похожим на supabase post,
+// чтобы твой рендер почти не отличался.
+function normalizeDiscordPost(dp) {
+  return {
+    id: dp.id,                    // строка вида "discord:..."
+    created_at: dp.created_at,
+    title: dp.title,
+    content: dp.content,
+    image_url: dp.image_url,
+
+    public_id: dp.public_id,      // важно для фильтрации по каналу
+    is_user_post: true,           // чтобы твой UI мог показать author tag
+    author_name: dp.author_name || 'discord',
+
+    // имитируем join publics(*)
+    publics: {
+      id: dp.public_id,
+      name: dp.public_name || 'DISCORD',
+      avatar_url: dp.public_avatar_url || 'https://via.placeholder.com/48',
+      is_verified: true
+    },
+
+    // маркер источника
+    _source: 'discord',
+
+    // комменты (не из supabase)
+    _discord_comments: Array.isArray(dp.comments) ? dp.comments : []
+  };
+}
+
+function escapeHTML(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function renderDiscordComments(postId, comments) {
+  const wrap = document.getElementById(`discord-comments-list-${cssSafeId(postId)}`);
+  if (!wrap) return;
+  if (!comments || comments.length === 0) {
+    wrap.innerHTML = `<div class="empty-state">${currentLang === 'ru' ? 'КОММЕНТОВ НЕТ' : 'NO COMMENTS'}</div>`;
+    return;
+  }
+
+  wrap.innerHTML = comments
+    .slice()
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(c => `
+      <div class="comment-item">
+        <div class="comment-author" onclick="openProfile('${escapeHTML(c.author_name || 'user')}')">
+          @${escapeHTML((c.author_name || 'user').toUpperCase())}
+        </div>
+        <div class="comment-text">${escapeHTML(c.text).replace(/\n/g,'<br>')}</div>
+        <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
+      </div>
+    `).join('');
+}
+
+// чтобы id "discord:123" можно было использовать в DOM
+function cssSafeId(id) {
+  return String(id).replaceAll(':', '_').replaceAll('/', '_');
+}
+
+function toggleDiscordComments(postId) {
+  const el = document.getElementById(`discord-comments-${cssSafeId(postId)}`);
+  if (!el) return;
+  el.classList.toggle('hidden');
+}
+
+
+
 // Посты
 async function loadPosts(pubId = null) {
     saveScrollPosition();
@@ -500,49 +598,122 @@ async function loadPosts(pubId = null) {
     container.innerHTML = `<div class="loading">LOADING...</div>`;
 
     try {
-        let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
-        if (pubId) query = query.eq('public_id', pubId);
-        const { data: posts } = await query;
+  let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
+  if (pubId) query = query.eq('public_id', pubId);
 
-        if (pubId && currentUser) userPanel.classList.remove('hidden'); else userPanel.classList.add('hidden');
+  // грузим и supabase посты, и discord json параллельно
+  const [sbRes, discordRaw] = await Promise.all([
+    query,
+    fetchDiscordPosts()
+  ]);
 
-        let html = pubId ? `<button class="back-btn" onclick="loadPosts(null)"><i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}</button>` : '';
-        
-        if (!posts || posts.length === 0) {
-            html += `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
-        } else {
-            for (let post of posts) {
-                const isSub = currentUser ? await checkSubscription(post.public_id) : false;
-                html += `
-                <div class="post-card">
-                    <h3 class="post-title">${(post.title || 'NO SUBJECT').toUpperCase()}</h3>
-                    <div class="post-header">
-                        <img src="${post.publics?.avatar_url}" class="post-avatar" onclick="loadPosts(${post.public_id})">
-                        <div class="post-meta">
-                            <div class="post-channel" onclick="loadPosts(${post.public_id})">${post.publics?.name} ${post.is_user_post ? '<span class="post-author-tag">@'+post.author_name+'</span>':''}</div>
-                            <div class="post-date">${new Date(post.created_at).toLocaleString()}</div>
-                        </div>
-                        ${currentUser ? `<button class="subscribe-btn ${isSub ? 'subscribed':''}" onclick="toggleSubscription(${post.public_id})">${isSub ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}</button>` : ''}
-                    </div>
-                    <div class="post-content">${post.content}</div>
-                    ${post.image_url ? `<img src="${post.image_url}" class="post-image" onclick="window.open(this.src)">` : ''}
-                    <div class="post-actions">
-                        <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})"><i class="fas fa-heart"></i> ${post.likes_count}</button>
-                        <button class="action-btn" onclick="toggleComments(${post.id})"><i class="fas fa-comments"></i> ${i18n[currentLang].responses}</button>
-                    </div>
-                    <div id="comments-${post.id}" class="comments-section hidden">
-                        <div id="comments-list-${post.id}"></div>
-                        <div class="comment-input">
-                            <input type="text" id="comment-input-${post.id}" placeholder="...">
-                            <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
-                        </div>
-                    </div>
-                </div>`;
-            }
+  const supaPosts = (sbRes?.data || []).map(p => ({ ...p, _source: 'supabase' }));
+  const discordPosts = (discordRaw || [])
+    .map(normalizeDiscordPost)
+    .filter(p => !pubId || String(p.public_id) === String(pubId));
+
+  // объединяем и сортируем по дате
+  const posts = [...discordPosts, ...supaPosts]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  if (pubId && currentUser) userPanel.classList.remove('hidden'); else userPanel.classList.add('hidden');
+
+  let html = pubId
+    ? `<button class="back-btn" onclick="loadPosts(null)"><i class="fas fa-arrow-left"></i> ${i18n[currentLang].global_feed}</button>`
+    : '';
+
+  if (!posts || posts.length === 0) {
+    html += `<div class="empty-state">${i18n[currentLang].no_signals}</div>`;
+  } else {
+    for (let post of posts) {
+      const isDiscord = post._source === 'discord';
+      const isSub = (!isDiscord && currentUser) ? await checkSubscription(post.public_id) : (currentUser ? await checkSubscription(post.public_id) : false);
+
+      // чуть безопаснее контент (у тебя сейчас вставляется как есть)
+      const safeTitle = escapeHTML((post.title || 'NO SUBJECT')).toUpperCase();
+      const safeContent = escapeHTML(post.content || '').replace(/\n/g, '<br>');
+
+      html += `
+      <div class="post-card">
+        <h3 class="post-title">
+          ${safeTitle}
+          ${isDiscord ? `<span class="post-author-tag" style="margin-left:10px">DISCORD</span>` : ''}
+        </h3>
+
+        <div class="post-header">
+          <img src="${post.publics?.avatar_url || 'https://via.placeholder.com/48'}"
+               class="post-avatar" onclick="loadPosts(${post.public_id})">
+
+          <div class="post-meta">
+            <div class="post-channel" onclick="loadPosts(${post.public_id})">
+              ${escapeHTML(post.publics?.name || 'Unknown')}
+              ${post.is_user_post ? `<span class="post-author-tag">@${escapeHTML(post.author_name || '')}</span>` : ''}
+            </div>
+            <div class="post-date">${new Date(post.created_at).toLocaleString()}</div>
+          </div>
+
+          ${currentUser ? `
+            <button class="subscribe-btn ${isSub ? 'subscribed':''}" onclick="toggleSubscription(${post.public_id})">
+              ${isSub ? i18n[currentLang].unsubscribe : i18n[currentLang].subscribe}
+            </button>` : ''
+          }
+        </div>
+
+        <div class="post-content">${safeContent}</div>
+
+        ${post.image_url ? `<img src="${post.image_url}" class="post-image" onclick="window.open(this.src)">` : ''}
+
+        <div class="post-actions">
+          ${
+            isDiscord
+              ? `<button class="action-btn" onclick="toggleDiscordComments('${escapeHTML(post.id)}')">
+                   <i class="fas fa-comments"></i> ${i18n[currentLang].responses} (${post._discord_comments.length})
+                 </button>`
+              : `
+                <button class="action-btn" onclick="likePost(${post.id}, ${post.likes_count})"><i class="fas fa-heart"></i> ${post.likes_count}</button>
+                <button class="action-btn" onclick="toggleComments(${post.id})"><i class="fas fa-comments"></i> ${i18n[currentLang].responses}</button>
+              `
+          }
+        </div>
+
+        ${
+          isDiscord
+            ? `
+              <div id="discord-comments-${cssSafeId(post.id)}" class="comments-section hidden">
+                <div id="discord-comments-list-${cssSafeId(post.id)}"></div>
+              </div>
+            `
+            : `
+              <div id="comments-${post.id}" class="comments-section hidden">
+                <div id="comments-list-${post.id}"></div>
+                <div class="comment-input">
+                  <input type="text" id="comment-input-${post.id}" placeholder="...">
+                  <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+                </div>
+              </div>
+            `
         }
-        container.innerHTML = html;
-        restoreScrollPosition();
-    } catch (e) { console.error(e); }
+      </div>
+      `;
+
+      // после вставки блока — если это discord, сразу рендерим комменты в контейнер
+      // (тут просто накапливаем, реально вызовем после container.innerHTML)
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Теперь когда DOM готов — отрисуем discord комменты
+  for (let post of posts) {
+    if (post._source === 'discord') {
+      renderDiscordComments(post.id, post._discord_comments);
+    }
+  }
+
+  restoreScrollPosition();
+} catch (e) {
+  console.error(e);
+}
 }
 
 // Посты

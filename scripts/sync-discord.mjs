@@ -39,6 +39,17 @@ async function discordFetch(endpoint) {
   return text ? JSON.parse(text) : null;
 }
 
+function stripQuery(url) {
+  try {
+    const u = new URL(url);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 function pickImageFromMessage(msg) {
   return (
     msg?.attachments?.[0]?.url ||
@@ -102,6 +113,7 @@ async function fetchArchivedThreadsFromForum(forumId) {
   return all;
 }
 
+
 async function fetchThreadAsPost(thread, forumId) {
   const threadId = thread.id;
 
@@ -126,7 +138,10 @@ async function fetchThreadAsPost(thread, forumId) {
     // для форума лучше брать имя треда как заголовок
     title: thread.name || (starter.content ? starter.content.slice(0, 80) : `POST ${threadId}`),
     content: starter.content || "",
-    image_url: pickImageFromMessage(starter),
+    image_url: (() => {
+  const u = pickImageFromMessage(starter);
+  return u ? stripQuery(u) : null;
+})(),
 
     created_at: starter.timestamp,
     author_name: starter.author?.username || "user",

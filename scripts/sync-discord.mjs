@@ -33,7 +33,7 @@ async function fetchForumPosts() {
 
   for (const thread of threads.threads) {
     const messages = await discordFetch(
-      `/channels/${thread.id}/messages?limit=50`
+      `/channels/${thread.id}/messages?limit=500`
     );
 
     if (!messages.length) continue;
@@ -52,9 +52,9 @@ async function fetchForumPosts() {
     posts.push({
       id: `discord:${thread.id}`,
       source: "discord",
-      public_id: 1, // ⬅️ ВПИШИ ID паблика из Supabase
-      public_name: "DISCORD",
-      public_avatar_url: "https://cdn-icons-png.flaticon.com/512/2111/2111370.png",
+      public_id: 9, // ⬅️ ВПИШИ ID паблика из Supabase
+      public_name: "🅲🅽🅽-breaking-bad-news📰",
+      public_avatar_url: "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme",
       title: thread.name,
       content: starter.content,
       image_url: starter.attachments?.[0]?.url || null,

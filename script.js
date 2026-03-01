@@ -44,12 +44,23 @@ async function fetchDiscordPosts() {
   }
 }
 
+function stripQuery(url) {
+  try {
+    const u = new URL(url);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 function normalizeDiscordPost(dp) {
   return {
     id: dp.id,
     title: dp.title,
     content: dp.content,
-    image_url: dp.image_url,
+    image_url: dp.image_url ? stripQuery(dp.image_url) : null,
     created_at: dp.created_at,
     public_id: dp.public_id,
     likes_count: 0,
@@ -656,7 +667,7 @@ function normalizeDiscordPost(dp) {
     created_at: dp.created_at,
     title: dp.title,
     content: dp.content,
-    image_url: dp.image_url,
+    image_url: dp.image_url ? stripQuery(dp.image_url) : null,
 
     public_id: dp.public_id,      // важно для фильтрации по каналу
     is_user_post: true,           // чтобы твой UI мог показать author tag
@@ -1316,7 +1327,7 @@ const discordPosts = (discordRaw || [])
         id: dp.id,
         title: dp.title,
         content: dp.content,
-        image_url: dp.image_url,
+        image_url: dp.image_url ? stripQuery(dp.image_url) : null,
         created_at: dp.created_at,
         public_id: dp.public_id,
         likes_count: 0,

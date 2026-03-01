@@ -13,7 +13,7 @@ const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
 const PUBLIC_AVATAR_URL = "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
 
-const POSTS_LIMIT = 50;      // сколько постов форума тянуть
+const POSTS_LIMIT = 500;      // сколько постов форума тянуть
 const COMMENTS_LIMIT = 100;  // сколько комментов на пост
 
 async function discordFetch(endpoint) {

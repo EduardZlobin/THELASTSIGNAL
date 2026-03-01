@@ -13,17 +13,10 @@ const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
 const PUBLIC_AVATAR_URL = "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
 
-const THREADS_PAGE_LIMIT = 50;
-
-// Сколько страниц архива листать (50 тредов на страницу).
-// 20 страниц = до ~1000 старых постов.
-const ARCHIVE_PAGES = 20;
-
-// Максимум сколько постов сохранять в json (чтобы файл не раздувался)
-const MAX_POSTS = 500;
+const THREADS_PAGE_LIMIT = 50; // Discord max for archived endpoints
 const MESSAGES_LIMIT = 100;
 // сколько страниц архивных тредов пробовать (на всякий)
-
+const ARCHIVE_PAGES = 50; // больше шансов дотянуться до старых тредов
 
 async function discordFetch(endpoint) {
   const url = `${API}${endpoint}`;
@@ -37,17 +30,6 @@ async function discordFetch(endpoint) {
     throw new Error(`Discord API error ${res.status} on ${endpoint}: ${text}`);
   }
   return text ? JSON.parse(text) : null;
-}
-
-function stripQuery(url) {
-  try {
-    const u = new URL(url);
-    u.search = "";
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return url;
-  }
 }
 
 function pickImageFromMessage(msg) {
@@ -87,6 +69,7 @@ async function fetchActiveThreadsFromGuild(guildId, forumId) {
 }
 
 async function fetchArchivedThreadsFromForum(forumId) {
+  // Может падать 404/403 — тогда вернём []
   const all = [];
   let before = null;
 
@@ -95,24 +78,18 @@ async function fetchArchivedThreadsFromForum(forumId) {
       ? `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}&before=${encodeURIComponent(before)}`
       : `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}`;
 
-    const arch = await safeFetch(endpoint, `archived threads page ${i + 1}`);
+    const arch = await safeFetch(endpoint, "archived threads");
     if (!arch) break;
 
     const chunk = arch?.threads || [];
     all.push(...chunk);
 
     if (!arch?.has_more || chunk.length === 0) break;
-
-    // двигаемся дальше в прошлое
     before = chunk[chunk.length - 1].archive_timestamp;
-
-    // если уже набрали много — можно стопать рано
-    if (all.length >= MAX_POSTS) break;
   }
 
   return all;
 }
-
 
 async function fetchThreadAsPost(thread, forumId) {
   const threadId = thread.id;
@@ -138,10 +115,7 @@ async function fetchThreadAsPost(thread, forumId) {
     // для форума лучше брать имя треда как заголовок
     title: thread.name || (starter.content ? starter.content.slice(0, 80) : `POST ${threadId}`),
     content: starter.content || "",
-    image_url: (() => {
-  const u = pickImageFromMessage(starter);
-  return u ? stripQuery(u) : null;
-})(),
+    image_url: pickImageFromMessage(starter),
 
     created_at: starter.timestamp,
     author_name: starter.author?.username || "user",
@@ -175,10 +149,7 @@ async function main() {
   // 4) Объединяем и делаем unique по id
   const uniq = new Map();
   for (const t of [...activeForumThreads, ...archivedForumThreads]) uniq.set(t.id, t);
-  let threads = [...uniq.values()];
-  threads.sort((a, b) => new Date(b.archive_timestamp || b.last_message_id || 0) - new Date(a.archive_timestamp || a.last_message_id || 0));
-  threads = threads.slice(0, MAX_POSTS);
-
+  const threads = [...uniq.values()];
   console.log("Total unique threads to process =", threads.length);
 
   // 5) Тянем посты

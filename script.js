@@ -2,6 +2,44 @@
 const SB_URL = 'https://adzxwgaoozuoamqqwkcd.supabase.co';
 const SB_KEY = 'sb_publishable_MxwhklaWPh4uOnvl_WI4eg_ceEre8pi';
 const sb = supabase.createClient(SB_URL, SB_KEY);
+
+// ===== DISCORD JSON FEED =====
+const DISCORD_POSTS_URL = "discord_posts.json";
+
+async function fetchDiscordPosts() {
+  try {
+    const res = await fetch(`${DISCORD_POSTS_URL}?v=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn("Discord JSON load error:", e);
+    return [];
+  }
+}
+
+function normalizeDiscordPost(dp) {
+  return {
+    id: dp.id,
+    title: dp.title,
+    content: dp.content,
+    image_url: dp.image_url,
+    created_at: dp.created_at,
+    public_id: dp.public_id,
+    likes_count: 0,
+    is_user_post: true,
+    author_name: dp.author_name || "discord",
+    publics: {
+      id: dp.public_id,
+      name: dp.public_name || "DISCORD",
+      avatar_url: dp.public_avatar_url,
+      is_verified: true
+    },
+    _is_discord: true,
+    _discord_comments: dp.comments || []
+  };
+}
+
 let onlineUsers = {}; // Хранилище для активных юзеров
 
 let currentUser = null;
@@ -919,10 +957,47 @@ async function loadPosts(pubId = null) {
     const userPanel = document.getElementById('user-post-area');
     if (container) container.innerHTML = `<div class="loading">${currentLang === 'ru' ? 'ЗАГРУЗКА...' : 'LOADING...'}</div>`;
     try {
-        let query = sb.from('posts').select('*, publics(*)').order('created_at', { ascending: false });
-        if (pubId) query = query.eq('public_id', pubId);
-        const { data: posts, error } = await query;
-        if (error) throw error;
+        let query = sb.from('posts')
+    .select('*, publics(*)')
+    .order('created_at', { ascending: false });
+
+if (pubId) query = query.eq('public_id', pubId);
+
+const [{ data: sbPosts, error }, discordRaw] = await Promise.all([
+    query,
+    fetchDiscordPosts()
+]);
+
+if (error) throw error;
+
+// преобразуем Discord посты под формат сайта
+const discordPosts = (discordRaw || [])
+    .map(dp => ({
+        id: dp.id,
+        title: dp.title,
+        content: dp.content,
+        image_url: dp.image_url,
+        created_at: dp.created_at,
+        public_id: dp.public_id,
+        likes_count: 0,
+        is_user_post: true,
+        author_name: dp.author_name || "discord",
+        publics: {
+            id: dp.public_id,
+            name: dp.public_name || "DISCORD",
+            avatar_url: dp.public_avatar_url,
+            is_verified: true
+        },
+        _is_discord: true,
+        _discord_comments: dp.comments || []
+    }))
+    .filter(p => !pubId || String(p.public_id) === String(pubId));
+
+// объединяем Supabase + Discord
+const posts = [
+    ...(sbPosts || []),
+    ...discordPosts
+].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         if (pubId && currentUser) {
             const { data: pubInfo } = await sb.from('publics').select('is_verified').eq('id', pubId).single();
             if (pubInfo && !pubInfo.is_verified && userProfile && !userProfile.is_admin) {
@@ -1036,6 +1111,31 @@ function openImageInNewTab(imageUrl) { window.open(imageUrl, '_blank'); }
 
 // Комментарии
 async function toggleComments(postId) {
+    if (String(postId).startsWith("discord:")) {
+  const section = document.getElementById(`comments-${postId}`);
+  const list = document.getElementById(`comments-list-${postId}`);
+  if (!section || !list) return;
+
+  section.classList.toggle("hidden");
+  if (section.classList.contains("hidden")) return;
+
+  const all = await fetchDiscordPosts();
+  const post = all.find(p => p.id === postId);
+  const comments = post?.comments || [];
+
+  list.innerHTML = comments.length
+    ? comments.map(c => `
+      <div class="comment-item">
+        <div class="comment-meta">
+          <span class="comment-author">@${c.author_name}</span>
+        </div>
+        <div>${c.text || ""}</div>
+      </div>
+    `).join("")
+    : `<div class="empty-state">нет комментариев</div>`;
+
+  return;
+}
     const commentsSection = document.getElementById(`comments-${postId}`);
     if (!commentsSection) return;
     commentsSection.classList.toggle('hidden');

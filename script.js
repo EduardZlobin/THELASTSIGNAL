@@ -30,10 +30,10 @@ function normalizeDiscordPost(dp) {
     is_user_post: true,
     author_name: dp.author_name || "discord",
     publics: {
-      id: dp.public_id,
-      name: dp.public_name || "DISCORD",
-      avatar_url: dp.public_avatar_url,
-      is_verified: true
+    id: dp.public_id,
+    name: "🅲🅽🅽-breaking-bad-news📰",
+    avatar_url: "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme",
+    is_verified: true
     },
     _is_discord: true,
     _discord_comments: dp.comments || []

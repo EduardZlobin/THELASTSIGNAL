@@ -6,6 +6,32 @@ const sb = supabase.createClient(SB_URL, SB_KEY);
 // ===== DISCORD JSON FEED =====
 const DISCORD_POSTS_URL = "discord_posts.json";
 
+const DISCORD_PUBLIC_OVERRIDES = {
+  name: "🅲🅽🅽-breaking-bad-news📰",
+  avatar_url: "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme",
+};
+
+function applyDiscordBranding(post) {
+  if (!post || !post._is_discord) return post;
+
+  // гарантируем publics
+  post.publics = post.publics || {};
+  post.publics.id = post.public_id;
+  post.publics.is_verified = true;
+
+  // переопределяем
+  post.publics.name = DISCORD_PUBLIC_OVERRIDES.name;
+  post.publics.avatar_url = DISCORD_PUBLIC_OVERRIDES.avatar_url;
+
+  return post;
+}
+
+function applyDiscordBrandingToList(posts) {
+  if (!Array.isArray(posts)) return posts;
+  for (let i = 0; i < posts.length; i++) applyDiscordBranding(posts[i]);
+  return posts;
+}
+
 async function fetchDiscordPosts() {
   try {
     const res = await fetch(`${DISCORD_POSTS_URL}?v=${Date.now()}`, { cache: "no-store" });
@@ -34,7 +60,7 @@ function normalizeDiscordPost(dp) {
     name: "🅲🅽🅽-breaking-bad-news📰",
     avatar_url: "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme",
     is_verified: true
-    },
+},
     _is_discord: true,
     _discord_comments: dp.comments || []
   };
@@ -653,6 +679,7 @@ async function loadPosts(pubId = null) {
   // объединяем и сортируем по дате
   const posts = [...discordPosts, ...supaPosts]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    applyDiscordBrandingToList(posts);
 
   if (pubId && currentUser) userPanel.classList.remove('hidden'); else userPanel.classList.add('hidden');
 

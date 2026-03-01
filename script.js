@@ -769,7 +769,13 @@ async function loadPosts(pubId = null) {
 
         // ===== INFINITE SCROLL STATE =====
         let visibleCount = 0;
-        const STEP = 10;
+const STEP = 10;
+
+let isLoadingMore = false;
+let userHasScrolled = false;
+
+// считаем, что скролл был только когда пользователь реально прокрутил
+window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: true, passive: true });
 
         container.innerHTML = pubId
             ? `<button class="back-btn" onclick="loadPosts(null)">
@@ -871,7 +877,7 @@ async function loadPosts(pubId = null) {
                 }
             }
 
-            visibleCount += STEP;
+            visibleCount += slice.length;
 
             if (visibleCount >= posts.length) {
                 observer.disconnect();
@@ -879,11 +885,24 @@ async function loadPosts(pubId = null) {
             }
         }
 
-        const observer = new IntersectionObserver(entries => {
-            if (entries[0].isIntersecting) {
-                renderNextBatch();
-            }
-        });
+        const observer = new IntersectionObserver(async (entries) => {
+    if (!entries[0].isIntersecting) return;
+
+    // ключевой момент: не догружаем само при первом рендере
+    if (!userHasScrolled) return;
+
+    if (isLoadingMore) return;
+    isLoadingMore = true;
+    try {
+        await renderNextBatch();
+    } finally {
+        isLoadingMore = false;
+    }
+}, {
+    root: null,
+    threshold: 0.01,
+    rootMargin: "200px" // начнёт грузить чуть заранее, но только после скролла
+});
 
         observer.observe(sentinel);
 

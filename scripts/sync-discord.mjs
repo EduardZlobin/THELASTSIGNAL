@@ -13,10 +13,17 @@ const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
 const PUBLIC_AVATAR_URL = "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
 
-const THREADS_PAGE_LIMIT = 500;
+const THREADS_PAGE_LIMIT = 50;
+
+// Сколько страниц архива листать (50 тредов на страницу).
+// 20 страниц = до ~1000 старых постов.
+const ARCHIVE_PAGES = 20;
+
+// Максимум сколько постов сохранять в json (чтобы файл не раздувался)
+const MAX_POSTS = 500;
 const MESSAGES_LIMIT = 100;
 // сколько страниц архивных тредов пробовать (на всякий)
-const ARCHIVE_PAGES = 5;
+
 
 async function discordFetch(endpoint) {
   const url = `${API}${endpoint}`;
@@ -69,7 +76,6 @@ async function fetchActiveThreadsFromGuild(guildId, forumId) {
 }
 
 async function fetchArchivedThreadsFromForum(forumId) {
-  // Может падать 404/403 — тогда вернём []
   const all = [];
   let before = null;
 
@@ -78,14 +84,19 @@ async function fetchArchivedThreadsFromForum(forumId) {
       ? `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}&before=${encodeURIComponent(before)}`
       : `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}`;
 
-    const arch = await safeFetch(endpoint, "archived threads");
+    const arch = await safeFetch(endpoint, `archived threads page ${i + 1}`);
     if (!arch) break;
 
     const chunk = arch?.threads || [];
     all.push(...chunk);
 
     if (!arch?.has_more || chunk.length === 0) break;
+
+    // двигаемся дальше в прошлое
     before = chunk[chunk.length - 1].archive_timestamp;
+
+    // если уже набрали много — можно стопать рано
+    if (all.length >= MAX_POSTS) break;
   }
 
   return all;
@@ -149,7 +160,10 @@ async function main() {
   // 4) Объединяем и делаем unique по id
   const uniq = new Map();
   for (const t of [...activeForumThreads, ...archivedForumThreads]) uniq.set(t.id, t);
-  const threads = [...uniq.values()];
+  let threads = [...uniq.values()];
+  threads.sort((a, b) => new Date(b.archive_timestamp || b.last_message_id || 0) - new Date(a.archive_timestamp || a.last_message_id || 0));
+  threads = threads.slice(0, MAX_POSTS);
+
   console.log("Total unique threads to process =", threads.length);
 
   // 5) Тянем посты

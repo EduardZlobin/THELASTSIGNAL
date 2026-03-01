@@ -872,13 +872,23 @@ window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: tru
 
                     <div class="post-content">${safeContent}</div>
 
-                    ${post.image_url ? `<img src="${post.image_url}" class="post-image" onclick="window.open(this.src)">` : ''}
+                    ${post.image_url ? `<div class="post-image-container">
+  <img src="${post.image_url}" class="post-image" loading="lazy" onclick="toggleImageSize(this)" alt="Post image">
+  <div class="image-controls">
+    <button class="image-btn" onclick="toggleImageSize(this.parentElement.previousElementSibling)">
+      <i class="fas fa-expand-alt"></i>
+    </button>
+    <button class="image-btn" onclick="openImageInNewTab('${post.image_url}')">
+      <i class="fas fa-external-link-alt"></i>
+    </button>
+  </div>
+</div>` : ''}
 
                     <div class="post-actions">
                         ${
                             isDiscord
                                 ? `<button class="action-btn"
-                                       onclick="toggleDiscordComments('${escapeHTML(post.id)}')">
+                                       onclick="toggleDiscordComments('${cssSafeId(post.id)}')">
                                        <i class="fas fa-comments"></i>
                                        ${i18n[currentLang].responses}
                                        (${post._discord_comments.length})
@@ -903,21 +913,18 @@ window.addEventListener('scroll', () => { userHasScrolled = true; }, { once: tru
                                    <div id="discord-comments-list-${cssSafeId(post.id)}"></div>
                                </div>`
                             : `<div id="comments-${post.id}" class="comments-section hidden">
-                                   <div id="comments-list-${post.id}"></div>
-                                   <div class="comment-input">
-                                       <input type="text"
-                                              id="comment-input-${post.id}">
-                                       <button onclick="sendComment(${post.id})">
-                                           ${i18n[currentLang].send}
-                                       </button>
-                                   </div>
-                               </div>`
+  <div id="comments-list-${post.id}" class="comments-list"></div>
+  <div class="comment-input">
+    <input type="text" id="comment-input-${post.id}" placeholder="${i18n[currentLang].send}...">
+    <button onclick="sendComment(${post.id})">${i18n[currentLang].send}</button>
+  </div>
+</div>`
                     }
                 </div>
                 `);
 
                 if (isDiscord) {
-                    renderDiscordComments(post.id, post._discord_comments);
+                    renderDiscordComments(cssSafeId(post.id), post._discord_comments);
                 }
             }
 

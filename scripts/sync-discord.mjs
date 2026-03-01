@@ -9,17 +9,19 @@ if (!FORUM_ID) throw new Error("DISCORD_CHANNEL_ID missing");
 const API = "https://discord.com/api/v10";
 
 // ====== CONFIG ======
-const PUBLIC_ID = 9;
+const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
-const PUBLIC_AVATAR_URL =
-  "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
+const PUBLIC_AVATAR_URL = "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
 
-// Discord limits
-const THREADS_PAGE_LIMIT = 50;   // archived threads endpoint обычно max 50
-const MESSAGES_LIMIT = 100;      // messages endpoint max 100
-const ARCHIVE_PAGES_PUBLIC = 60; // 60*50 = до 3000 тредов
-const ARCHIVE_PAGES_JOINED = 60; // иногда вытягивает больше старых
-const MAX_THREADS_TO_PROCESS = 2500; // предохранитель для Actions
+// Discord archived threads endpoint обычно max 50
+const THREADS_PAGE_LIMIT = 500;
+
+const MESSAGES_LIMIT = 100;
+
+// сколько страниц архива листать:
+// 60 страниц * 50 тредов = до ~3000 старых тредов
+// если у тебя их меньше — цикл сам остановится по has_more=false
+const ARCHIVE_PAGES = 60;
 
 async function discordFetch(endpoint) {
   const url = `${API}${endpoint}`;
@@ -29,19 +31,10 @@ async function discordFetch(endpoint) {
 
   const text = await res.text();
   if (!res.ok) {
-    // Discord часто маскирует отсутствие доступа под 404
+    // Discord любит маскировать отсутствие доступа под 404
     throw new Error(`Discord API error ${res.status} on ${endpoint}: ${text}`);
   }
   return text ? JSON.parse(text) : null;
-}
-
-async function safeFetch(endpoint, label) {
-  try {
-    return await discordFetch(endpoint);
-  } catch (e) {
-    console.warn(`[skip] ${label}: ${e.message}`);
-    return null;
-  }
 }
 
 function pickImageFromMessage(msg) {
@@ -62,72 +55,58 @@ function normalizeComment(m) {
   };
 }
 
-async function fetchActiveThreadsFromGuild(guildId, forumId) {
-  const data = await safeFetch(`/guilds/${guildId}/threads/active`, "guild active threads");
-  const threads = data?.threads || [];
-  return threads.filter(t => String(t.parent_id) === String(forumId));
+async function safeFetch(endpoint, label) {
+  try {
+    return await discordFetch(endpoint);
+  } catch (e) {
+    console.warn(`[skip] ${label}: ${e.message}`);
+    return null;
+  }
 }
 
-async function fetchArchivedThreadsGeneric(forumId, mode, maxPages) {
+async function fetchActiveThreadsFromGuild(guildId, forumId) {
+  // Guild-level endpoint: чаще доступен, даже когда channel threads endpoints чудят
+  const data = await discordFetch(`/guilds/${guildId}/threads/active`);
+  const threads = data?.threads || [];
+  // parent_id у тредов = id форума (для forum posts)
+  const forumThreads = threads.filter(t => String(t.parent_id) === String(forumId));
+  return forumThreads;
+}
+
+async function fetchArchivedThreadsFromForum(forumId) {
+  // Может падать 404/403 — тогда вернём []
   const all = [];
   let before = null;
 
-  for (let page = 0; page < maxPages; page++) {
+  for (let i = 0; i < ARCHIVE_PAGES; i++) {
     const endpoint = before
-      ? `/channels/${forumId}/threads/archived/${mode}?limit=${THREADS_PAGE_LIMIT}&before=${encodeURIComponent(before)}`
-      : `/channels/${forumId}/threads/archived/${mode}?limit=${THREADS_PAGE_LIMIT}`;
+      ? `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}&before=${encodeURIComponent(before)}`
+      : `/channels/${forumId}/threads/archived/public?limit=${THREADS_PAGE_LIMIT}`;
 
-    const arch = await safeFetch(endpoint, `archived ${mode} threads page ${page + 1}`);
+    const arch = await safeFetch(endpoint, "archived threads");
     if (!arch) break;
 
     const chunk = arch?.threads || [];
-    if (chunk.length === 0) break;
-
     all.push(...chunk);
 
-    if (!arch?.has_more) break;
-
-    // Для archived threads "before" — timestamp
+    if (!arch?.has_more || chunk.length === 0) break;
     before = chunk[chunk.length - 1].archive_timestamp;
-
-    if (all.length >= MAX_THREADS_TO_PROCESS) break;
   }
 
   return all;
 }
 
-async function fetchArchivedPublicThreadsFromForum(forumId) {
-  return await fetchArchivedThreadsGeneric(forumId, "public", ARCHIVE_PAGES_PUBLIC);
-}
-
-async function fetchArchivedJoinedThreadsFromForum(forumId) {
-  return await fetchArchivedThreadsGeneric(forumId, "joined", ARCHIVE_PAGES_JOINED);
-}
-
-async function fetchThreadAsPost(thread) {
+async function fetchThreadAsPost(thread, forumId) {
   const threadId = thread.id;
 
-  // ✅ STARTER MESSAGE — надёжно (для forum post: threadId == starter message id)
-  const starter = await safeFetch(
-    `/channels/${threadId}/messages/${threadId}`,
-    `starter message ${threadId}`
-  );
+  // тянем сообщения треда
+  const msgs = await safeFetch(`/channels/${threadId}/messages?limit=${MESSAGES_LIMIT}`, `thread messages ${threadId}`);
+  if (!msgs || msgs.length === 0) return null;
 
-  // Если вдруг не получилось (редко), пробуем взять из ленты сообщений
-  const msgs = await safeFetch(
-    `/channels/${threadId}/messages?limit=${MESSAGES_LIMIT}`,
-    `thread messages ${threadId}`
-  ) || [];
-
-  let starterMsg = starter;
-  if (!starterMsg) {
-    // Discord возвращает newest-first, поэтому "самое старое из полученных" — последний
-    starterMsg = msgs.length ? msgs[msgs.length - 1] : null;
-  }
-  if (!starterMsg) return null;
-
-  const comments = (msgs || [])
-    .filter(m => m && m.id && m.id !== starterMsg.id)
+  // starter — самое старое сообщение (обычно последний элемент массива)
+  const starter = msgs[msgs.length - 1];
+  const comments = msgs
+    .filter(m => m.id !== starter.id)
     .map(normalizeComment);
 
   return {
@@ -138,12 +117,13 @@ async function fetchThreadAsPost(thread) {
     public_name: PUBLIC_NAME,
     public_avatar_url: PUBLIC_AVATAR_URL,
 
-    title: thread.name || (starterMsg.content ? starterMsg.content.slice(0, 80) : `POST ${threadId}`),
-    content: starterMsg.content || "",
-    image_url: pickImageFromMessage(starterMsg),
+    // для форума лучше брать имя треда как заголовок
+    title: thread.name || (starter.content ? starter.content.slice(0, 80) : `POST ${threadId}`),
+    content: starter.content || "",
+    image_url: pickImageFromMessage(starter),
 
-    created_at: starterMsg.timestamp,
-    author_name: starterMsg.author?.username || "user",
+    created_at: starter.timestamp,
+    author_name: starter.author?.username || "user",
 
     comments
   };
@@ -152,6 +132,7 @@ async function fetchThreadAsPost(thread) {
 async function main() {
   console.log("Fetching Discord posts...");
 
+  // 1) Считываем канал форума
   const ch = await discordFetch(`/channels/${FORUM_ID}`);
   console.log("Channel type:", ch?.type, "name:", ch?.name);
 
@@ -160,31 +141,26 @@ async function main() {
   }
 
   const guildId = ch?.guild_id;
-  if (!guildId) throw new Error("No guild_id on channel");
+  if (!guildId) throw new Error("No guild_id on channel (is it a DM? weird for forum)");
 
+  // 2) Активные треды через guild endpoint
   const activeForumThreads = await fetchActiveThreadsFromGuild(guildId, FORUM_ID);
-  console.log("Active forum threads =", activeForumThreads.length);
+  console.log("Active forum threads (guild-level) =", activeForumThreads.length);
 
-  const archivedPublic = await fetchArchivedPublicThreadsFromForum(FORUM_ID);
-  console.log("Archived PUBLIC threads =", archivedPublic.length);
+  // 3) Архивные треды форума (если доступно)
+  const archivedForumThreads = await fetchArchivedThreadsFromForum(FORUM_ID);
+  console.log("Archived forum threads =", archivedForumThreads.length);
 
-  const archivedJoined = await fetchArchivedJoinedThreadsFromForum(FORUM_ID);
-  console.log("Archived JOINED threads =", archivedJoined.length);
-
+  // 4) Объединяем и делаем unique по id
   const uniq = new Map();
-  for (const t of [...activeForumThreads, ...archivedPublic, ...archivedJoined]) uniq.set(t.id, t);
+  for (const t of [...activeForumThreads, ...archivedForumThreads]) uniq.set(t.id, t);
+  const threads = [...uniq.values()];
+  console.log("Total unique threads to process =", threads.length);
 
-  let threads = [...uniq.values()];
-  console.log("Total unique threads found =", threads.length);
-
-  if (threads.length > MAX_THREADS_TO_PROCESS) {
-    console.log(`Clamping threads from ${threads.length} to ${MAX_THREADS_TO_PROCESS}`);
-    threads = threads.slice(0, MAX_THREADS_TO_PROCESS);
-  }
-
+  // 5) Тянем посты
   const posts = [];
   for (const thread of threads) {
-    const post = await fetchThreadAsPost(thread);
+    const post = await fetchThreadAsPost(thread, FORUM_ID);
     if (post) posts.push(post);
   }
 

@@ -2598,3 +2598,74 @@ body::before {
 .main-content {
     min-width: 0; 
 }
+/* ===== COMPACT POSTS ===== */
+
+/* Уже центральную колонку */
+#posts-container,
+.feed-column {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* Сама карточка */
+.post-card {
+  padding: 14px 18px;
+  border-radius: 14px;
+}
+
+/* Заголовок меньше */
+.post-title {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+/* Основной текст компактнее */
+.post-content {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Аватар меньше */
+.post-avatar {
+  width: 38px;
+  height: 38px;
+}
+
+/* Метаданные компактнее */
+.post-meta {
+  font-size: 11px;
+}
+
+/* Кнопки действий меньше */
+.post-actions {
+  gap: 10px;
+}
+
+.action-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* Ограничим высоту изображений */
+.post-image {
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+/* ===== SMALLER POST IMAGES ===== */
+
+/* Ограничим ширину изображения */
+.post-image {
+  max-width: 480px;     /* уменьшаем ширину */
+  width: 100%;
+  max-height: 260px;    /* ограничим высоту */
+  object-fit: cover;    /* чтобы не растягивались */
+  border-radius: 12px;
+}
+
+/* Центрируем изображение внутри карточки */
+.post-image-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}

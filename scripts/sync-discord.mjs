@@ -13,10 +13,10 @@ const PUBLIC_ID = 9; // <-- твой publics.id из Supabase
 const PUBLIC_NAME = "🅲🅽🅽-breaking-bad-news📰";
 const PUBLIC_AVATAR_URL = "https://adzxwgaoozuoamqqwkcd.supabase.co/storage/v1/object/public/avatars/signal_1770110946500_z2pme";
 
-const THREADS_PAGE_LIMIT = 50; // Discord max for archived endpoints
+const THREADS_PAGE_LIMIT = 500;
 const MESSAGES_LIMIT = 100;
 // сколько страниц архивных тредов пробовать (на всякий)
-const ARCHIVE_PAGES = 50; // больше шансов дотянуться до старых тредов
+const ARCHIVE_PAGES = 5;
 
 async function discordFetch(endpoint) {
   const url = `${API}${endpoint}`;
